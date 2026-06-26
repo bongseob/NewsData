@@ -21,6 +21,18 @@ export interface ArticleRow extends RowDataPacket {
   updated_at: Date;
 }
 
+export interface ArticleStatusCountRow extends RowDataPacket {
+  status: ArticleStatus;
+  count: number;
+}
+
+export interface ListArticlesInput {
+  status?: ArticleStatus;
+  source?: ArticleSource;
+  limit?: number;
+  offset?: number;
+}
+
 export interface UpsertArticleInput {
   source: ArticleSource;
   externalId: string;
@@ -36,6 +48,15 @@ export interface UpsertArticleInput {
 
 export class ArticlesRepository {
   constructor(private readonly db: Db) {}
+
+  async findById(id: number): Promise<ArticleRow | null> {
+    const [rows] = await this.db.execute<ArticleRow[]>(
+      "SELECT * FROM articles WHERE id = :id LIMIT 1",
+      { id }
+    );
+
+    return rows[0] ?? null;
+  }
 
   async findBySourceExternalId(
     source: ArticleSource,
@@ -108,5 +129,45 @@ export class ArticlesRepository {
     }
 
     return existing.id;
+  }
+
+  async list(input: ListArticlesInput = {}): Promise<ArticleRow[]> {
+    const where: string[] = [];
+    const params: Record<string, string | number> = {};
+    const limit = Math.min(Math.max(input.limit ?? 50, 1), 100);
+    const offset = Math.max(input.offset ?? 0, 0);
+
+    if (input.status) {
+      where.push("status = :status");
+      params.status = input.status;
+    }
+
+    if (input.source) {
+      where.push("source = :source");
+      params.source = input.source;
+    }
+
+    const whereSql = where.length > 0 ? `WHERE ${where.join(" AND ")}` : "";
+    const [rows] = await this.db.execute<ArticleRow[]>(
+      `SELECT *
+       FROM articles
+       ${whereSql}
+       ORDER BY updated_at DESC, id DESC
+       LIMIT ${limit} OFFSET ${offset}`,
+      params
+    );
+
+    return rows;
+  }
+
+  async countByStatus(): Promise<ArticleStatusCountRow[]> {
+    const [rows] = await this.db.execute<ArticleStatusCountRow[]>(
+      `SELECT status, COUNT(*) AS count
+       FROM articles
+       GROUP BY status
+       ORDER BY status`
+    );
+
+    return rows;
   }
 }

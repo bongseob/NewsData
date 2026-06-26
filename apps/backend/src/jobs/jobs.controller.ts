@@ -1,5 +1,6 @@
-import { Body, Controller, Post } from "@nestjs/common";
-import { QUEUE_NAMES, type ArticleSource } from "@newsdata/shared";
+import { Body, Controller, Inject, Post } from "@nestjs/common";
+import type { ArticleSource } from "@newsdata/shared";
+import { JobsService } from "./jobs.service.js";
 
 interface CreateFetchJobRequest {
   source: ArticleSource;
@@ -8,16 +9,10 @@ interface CreateFetchJobRequest {
 
 @Controller("jobs")
 export class JobsController {
+  constructor(@Inject(JobsService) private readonly jobsService: JobsService) {}
+
   @Post("fetch")
-  createFetchJob(@Body() body: CreateFetchJobRequest): {
-    queue: string;
-    accepted: true;
-    source: ArticleSource;
-  } {
-    return {
-      queue: QUEUE_NAMES.fetch,
-      accepted: true,
-      source: body.source
-    };
+  createFetchJob(@Body() body: CreateFetchJobRequest) {
+    return this.jobsService.createFetchJob(body);
   }
 }
