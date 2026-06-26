@@ -1,0 +1,19 @@
+{
+  "name": "newsdata-dmaker",
+  "private": true,
+  "version": "0.1.0",
+  "description": "NewsData.io and Newswire collection, processing, and d-maker.kr publishing system.",
+  "packageManager": "npm@10.0.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "dev:backend": "npm --workspace @newsdata/backend run dev",
+    "dev:frontend": "npm --workspace @newsdata/frontend run dev",
+    "dev:worker": "npm --workspace @newsdata/worker run dev"
+  }
+}

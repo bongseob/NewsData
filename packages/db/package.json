@@ -1,0 +1,19 @@
+{
+  "name": "@newsdata/db",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@newsdata/shared": "0.1.0",
+    "mysql2": "^3.11.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.0"
+  }
+}
