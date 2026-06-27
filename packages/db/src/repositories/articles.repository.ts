@@ -19,6 +19,7 @@ export interface ArticleRow extends RowDataPacket {
   raw_payload: unknown;
   created_at: Date;
   updated_at: Date;
+  thumbnail_local_path?: string | null;
 }
 
 export interface ArticleStatusCountRow extends RowDataPacket {
@@ -138,21 +139,22 @@ export class ArticlesRepository {
     const offset = Math.max(input.offset ?? 0, 0);
 
     if (input.status) {
-      where.push("status = :status");
+      where.push("a.status = :status");
       params.status = input.status;
     }
 
     if (input.source) {
-      where.push("source = :source");
+      where.push("a.source = :source");
       params.source = input.source;
     }
 
     const whereSql = where.length > 0 ? `WHERE ${where.join(" AND ")}` : "";
     const [rows] = await this.db.execute<ArticleRow[]>(
-      `SELECT *
-       FROM articles
+      `SELECT a.*, aa.local_path as thumbnail_local_path
+       FROM articles a
+       LEFT JOIN article_assets aa ON a.id = aa.article_id AND aa.asset_type = 'THUMBNAIL'
        ${whereSql}
-       ORDER BY updated_at DESC, id DESC
+       ORDER BY a.updated_at DESC, a.id DESC
        LIMIT ${limit} OFFSET ${offset}`,
       params
     );

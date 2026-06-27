@@ -14,7 +14,9 @@ export function createMysqlPool(config: MysqlConfig): mysql.Pool {
     waitForConnections: true,
     connectionLimit: 10,
     namedPlaceholders: true,
-    timezone: "Z"
+    timezone: "Z",
+    enableKeepAlive: true,
+    keepAliveInitialDelay: 10000
   });
 }
 

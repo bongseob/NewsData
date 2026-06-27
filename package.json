@@ -15,5 +15,9 @@
     "dev:backend": "npm --workspace @newsdata/backend run dev",
     "dev:frontend": "npm --workspace @newsdata/frontend run dev",
     "dev:worker": "npm --workspace @newsdata/worker run dev"
+  },
+  "devDependencies": {
+    "tsx": "^4.22.4",
+    "typescript": "5.5"
   }
 }
