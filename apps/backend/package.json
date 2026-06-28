@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "dev": "tsx watch src/main.ts",
+    "dev": "tsx watch --tsconfig tsconfig.json src/main.ts",
     "start": "node dist/apps/backend/src/main.js",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },

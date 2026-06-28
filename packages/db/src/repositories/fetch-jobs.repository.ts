@@ -60,4 +60,23 @@ export class FetchJobsRepository {
 
     return rows[0] ?? null;
   }
+
+  async updateStatus(
+    id: number,
+    status: JobStatus,
+    errorMessage?: string | null
+  ): Promise<void> {
+    await this.db.execute(
+      `UPDATE fetch_jobs
+       SET status = :status,
+           error_message = :errorMessage,
+           updated_at = CURRENT_TIMESTAMP(3)
+       WHERE id = :id`,
+      {
+        id,
+        status,
+        errorMessage: errorMessage ?? null
+      }
+    );
+  }
 }

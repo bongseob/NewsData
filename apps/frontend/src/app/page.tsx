@@ -1,16 +1,7 @@
+import Link from "next/link";
 import { ARTICLE_STATUSES } from "@newsdata/shared";
 import { FetchButton } from "./FetchButton";
-
-const navItems = [
-  "대시보드",
-  "수집 설정",
-  "수동 수집",
-  "기사 목록",
-  "Draft 검수",
-  "발행 요청",
-  "Queue 상태",
-  "실패 로그"
-];
+import { Sidebar } from "./components/Sidebar";
 
 const statusLabels: Record<string, string> = {
   DRAFT: "검수 대기",
@@ -26,22 +17,24 @@ const API_BASE = "http://127.0.0.1:4000";
 
 async function getArticles() {
   try {
-    const res = await fetch(`${API_BASE}/articles?limit=10`, { cache: "no-store" });
+    const res = await fetch(`${API_BASE}/articles?limit=10`, {
+      cache: "no-store"
+    });
     if (!res.ok) return [];
     return await res.json();
-  } catch (e) {
-    console.error(e);
+  } catch {
     return [];
   }
 }
 
 async function getStatusCounts() {
   try {
-    const res = await fetch(`${API_BASE}/articles/status-counts`, { cache: "no-store" });
+    const res = await fetch(`${API_BASE}/articles/status-counts`, {
+      cache: "no-store"
+    });
     if (!res.ok) return [];
     return await res.json();
-  } catch (e) {
-    console.error(e);
+  } catch {
     return [];
   }
 }
@@ -49,35 +42,14 @@ async function getStatusCounts() {
 export default async function HomePage(): Promise<JSX.Element> {
   const articles = await getArticles();
   const counts = await getStatusCounts();
-  const countsMap = Object.fromEntries(counts.map((c: any) => [c.status, c.count]));
+  const countsMap = Object.fromEntries(
+    counts.map((c: any) => [c.status, c.count])
+  );
 
   return (
     <main className="min-h-screen bg-[#f4f6f8] text-ink-950">
       <div className="grid min-h-screen grid-cols-1 lg:grid-cols-[264px_1fr]">
-        <aside className="border-b border-line bg-white px-5 py-5 lg:border-b-0 lg:border-r">
-          <div className="mb-7">
-            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-ink-500">
-              d-maker.kr
-            </p>
-            <h1 className="mt-2 text-xl font-bold">NewsData Admin</h1>
-          </div>
-          <nav className="grid grid-cols-2 gap-2 lg:grid-cols-1">
-            {navItems.map((item, index) => (
-              <a
-                className={`rounded-md px-3 py-2 text-sm font-medium transition ${
-                  index === 0
-                    ? "bg-[#e8f1fb] text-[#0f5f9f]"
-                    : "text-ink-700 hover:bg-slate-100"
-                }`}
-                href="#"
-                key={item}
-              >
-                {item}
-              </a>
-            ))}
-          </nav>
-        </aside>
-
+        <Sidebar active="대시보드" />
         <section className="px-5 py-6 sm:px-8 lg:px-10">
           <header className="mb-7 flex flex-col gap-4 border-b border-line pb-6 sm:flex-row sm:items-center sm:justify-between">
             <div>
@@ -87,12 +59,12 @@ export default async function HomePage(): Promise<JSX.Element> {
               </h2>
             </div>
             <div className="flex flex-wrap gap-2">
-              <button
+              <Link
+                href="/drafts"
                 className="rounded-md border border-line bg-white px-4 py-2 text-sm font-semibold text-ink-700 shadow-sm hover:bg-slate-50"
-                type="button"
               >
-                기사 목록
-              </button>
+                Draft 검수
+              </Link>
               <FetchButton />
             </div>
           </header>
@@ -116,7 +88,9 @@ export default async function HomePage(): Promise<JSX.Element> {
                     {countsMap[status] ?? 0}건
                   </span>
                 </div>
-                <strong className="mt-5 block text-3xl font-bold">{countsMap[status] ?? 0}</strong>
+                <strong className="mt-5 block text-3xl font-bold">
+                  {countsMap[status] ?? 0}
+                </strong>
               </article>
             ))}
           </div>
@@ -125,21 +99,22 @@ export default async function HomePage(): Promise<JSX.Element> {
             <section className="rounded-lg border border-line bg-white p-5 shadow-panel">
               <div className="mb-4 flex items-center justify-between gap-3">
                 <h3 className="text-base font-bold">최근 수집된 기사</h3>
-                <button
+                <Link
+                  href="/drafts"
                   className="rounded-md border border-line px-3 py-1.5 text-xs font-semibold text-ink-700 hover:bg-slate-50"
-                  type="button"
                 >
                   전체 보기
-                </button>
+                </Link>
               </div>
               <div className="divide-y divide-line">
                 {articles.length === 0 ? (
                   <div className="py-4 text-sm text-ink-500">기사가 없습니다.</div>
                 ) : (
                   articles.map((article: any) => (
-                    <div
-                      className="grid gap-3 py-4 sm:grid-cols-[80px_1fr_90px]"
+                    <Link
+                      href={`/articles/${article.id}`}
                       key={article.id}
+                      className="grid gap-3 py-4 transition hover:bg-slate-50 sm:grid-cols-[80px_1fr_90px]"
                     >
                       {article.thumbnail_local_path ? (
                         <div className="h-20 w-20 flex-shrink-0 overflow-hidden rounded bg-slate-100">
@@ -155,20 +130,26 @@ export default async function HomePage(): Promise<JSX.Element> {
                         </div>
                       )}
                       <div className="min-w-0">
-                        <p className="truncate text-sm font-semibold">{article.title}</p>
+                        <p className="truncate text-sm font-semibold">
+                          {article.title}
+                        </p>
                         <p className="mt-1 line-clamp-2 text-xs text-ink-500">
                           {article.body}
                         </p>
                         <div className="mt-2 flex items-center gap-2 text-xs font-medium text-slate-400">
-                          <span className="text-[#0f5f9f]">{article.source}</span>
+                          <span className="text-[#0f5f9f]">
+                            {article.source}
+                          </span>
                           <span>&middot;</span>
-                          <span>{article.publisher_credit || "N/A"}</span>
+                          <span>
+                            {article.publisher_credit || "N/A"}
+                          </span>
                         </div>
                       </div>
                       <span className="self-start rounded-full bg-slate-100 px-2.5 py-1 text-center text-xs font-semibold text-ink-700">
                         {statusLabels[article.status] ?? article.status}
                       </span>
-                    </div>
+                    </Link>
                   ))
                 )}
               </div>
