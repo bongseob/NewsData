@@ -3,12 +3,15 @@ import { notFound } from "next/navigation";
 import { Sidebar } from "../../components/Sidebar";
 import { API_BASE } from "../../../lib/api-base";
 import { BodyTranslationButton } from "./BodyTranslationButton";
+import { TranslationEditor } from "./TranslationEditor";
+import { ArticleActions } from "./ArticleActions";
 
 interface ArticleDetail {
   id: number;
   source: string;
   external_id: string;
   status: string;
+  review_state: string;
   title: string;
   subtitle: string | null;
   body: string | null;
@@ -21,6 +24,7 @@ interface ArticleDetail {
   title_translated_at: string | null;
   body_translated_at: string | null;
   publisher_credit: string | null;
+  country: string | null;
   source_url: string | null;
   press_time: string | null;
   raw_payload: unknown;
@@ -77,11 +81,11 @@ export default async function ArticleDetailPage({
   return (
     <main className="min-h-screen bg-[#f4f6f8] text-ink-950">
       <div className="grid min-h-screen grid-cols-1 lg:grid-cols-[264px_1fr]">
-        <Sidebar active="Draft 검수" />
+        <Sidebar active="기사 큐레이션" />
         <section className="px-5 py-6 sm:px-8 lg:px-10">
           <div className="mb-5 flex items-center gap-2 text-sm text-ink-500">
-            <Link href="/drafts" className="hover:text-[#0f5f9f]">
-              Draft 검수
+            <Link href="/articles" className="hover:text-[#0f5f9f]">
+              기사 큐레이션
             </Link>
             <span>/</span>
             <span className="font-mono text-xs">#{article.id}</span>
@@ -149,23 +153,12 @@ export default async function ArticleDetailPage({
                   />
                 </div>
 
-                {translatedBody ? (
-                  <section className="mt-6">
-                    <div className="mb-2 flex items-center justify-between gap-3">
-                      <h3 className="text-sm font-bold">번역 본문</h3>
-                      <span className="text-xs text-ink-500">
-                        {formatDate(article.body_translated_at)}
-                      </span>
-                    </div>
-                    <div className="whitespace-pre-wrap rounded-md bg-slate-50 p-4 text-sm leading-relaxed text-ink-700">
-                      {translatedBody}
-                    </div>
-                  </section>
-                ) : (
-                  <section className="mt-6 rounded-md bg-amber-50 p-4 text-sm text-amber-800">
-                    본문은 아직 번역하지 않았습니다. 필요할 때만 위 버튼으로 번역하세요.
-                  </section>
-                )}
+                <TranslationEditor
+                  articleId={article.id}
+                  initialTitle={article.translated_title ?? ""}
+                  initialSubtitle={article.translated_subtitle ?? ""}
+                  initialBody={translatedBody ?? ""}
+                />
 
                 {originalBody && (
                   <section className="mt-6">
@@ -179,6 +172,12 @@ export default async function ArticleDetailPage({
             </div>
 
             <div className="space-y-5">
+              <ArticleActions
+                articleId={article.id}
+                status={article.status}
+                reviewState={article.review_state}
+              />
+
               <div className="rounded-lg border border-line bg-white p-5 shadow-panel">
                 <h3 className="mb-3 text-sm font-bold">메타데이터</h3>
                 <dl className="space-y-2 text-xs">
@@ -186,6 +185,12 @@ export default async function ArticleDetailPage({
                     <dt className="text-ink-500">external_id</dt>
                     <dd className="break-all font-mono text-ink-700">
                       {article.external_id}
+                    </dd>
+                  </div>
+                  <div className="flex justify-between gap-3">
+                    <dt className="text-ink-500">국가</dt>
+                    <dd className="text-right text-ink-700">
+                      {article.country || "N/A"}
                     </dd>
                   </div>
                   <div className="flex justify-between gap-3">

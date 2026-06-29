@@ -10,6 +10,15 @@ export const ARTICLE_STATUSES = {
 
 export type ArticleStatus = (typeof ARTICLE_STATUSES)[keyof typeof ARTICLE_STATUSES];
 
+export const ARTICLE_REVIEW_STATES = {
+  pending: "PENDING",
+  selected: "SELECTED",
+  excluded: "EXCLUDED"
+} as const;
+
+export type ArticleReviewState =
+  (typeof ARTICLE_REVIEW_STATES)[keyof typeof ARTICLE_REVIEW_STATES];
+
 export const JOB_STATUSES = {
   pending: "PENDING",
   running: "RUNNING",

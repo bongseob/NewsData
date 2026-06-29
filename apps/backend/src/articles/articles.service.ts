@@ -10,11 +10,17 @@ import {
   type ArticleStatusCountRow,
   type MysqlPool
 } from "@newsdata/db";
-import type { ArticleSource, ArticleStatus } from "@newsdata/shared";
+import type {
+  ArticleReviewState,
+  ArticleSource,
+  ArticleStatus
+} from "@newsdata/shared";
+import { ARTICLE_REVIEW_STATES } from "@newsdata/shared";
 import { MYSQL_POOL } from "../database/database.tokens.js";
 
 export interface ListArticlesRequest {
   status?: ArticleStatus;
+  reviewState?: ArticleReviewState;
   source?: ArticleSource;
   search?: string;
   limit?: number;
@@ -26,6 +32,16 @@ export interface TranslateBodyResult {
   translatedBody: string;
   bodyTranslatedAt: Date;
 }
+
+export interface SaveTranslationsRequest {
+  translatedTitle?: string | null;
+  translatedSubtitle?: string | null;
+  translatedBody?: string | null;
+}
+
+const VALID_REVIEW_STATES: ReadonlySet<string> = new Set(
+  Object.values(ARTICLE_REVIEW_STATES)
+);
 
 @Injectable()
 export class ArticlesService {
@@ -68,6 +84,92 @@ export class ArticlesService {
       translatedBody,
       bodyTranslatedAt: translatedAt
     };
+  }
+
+  private normalizeIds(ids: unknown): number[] {
+    if (!Array.isArray(ids)) {
+      throw new BadRequestException("ids는 배열이어야 합니다.");
+    }
+
+    const normalized = Array.from(
+      new Set(
+        ids
+          .map((value) => Number(value))
+          .filter((value) => Number.isInteger(value) && value > 0)
+      )
+    );
+
+    if (normalized.length === 0) {
+      throw new BadRequestException("유효한 기사 id가 없습니다.");
+    }
+
+    return normalized;
+  }
+
+  async setReviewState(
+    ids: unknown,
+    reviewState: string
+  ): Promise<{ updated: number }> {
+    if (!VALID_REVIEW_STATES.has(reviewState)) {
+      throw new BadRequestException("허용되지 않은 review_state 값입니다.");
+    }
+
+    const normalizedIds = this.normalizeIds(ids);
+    const updated = await new ArticlesRepository(this.pool).updateReviewState(
+      normalizedIds,
+      reviewState as ArticleReviewState
+    );
+
+    return { updated };
+  }
+
+  async markReadyToPublish(ids: unknown): Promise<{ updated: number }> {
+    const normalizedIds = this.normalizeIds(ids);
+    const updated = await new ArticlesRepository(this.pool).markReadyToPublish(
+      normalizedIds
+    );
+
+    return { updated };
+  }
+
+  async revertReadyToDraft(ids: unknown): Promise<{ updated: number }> {
+    const normalizedIds = this.normalizeIds(ids);
+    const updated = await new ArticlesRepository(this.pool).revertReadyToDraft(
+      normalizedIds
+    );
+
+    return { updated };
+  }
+
+  async saveTranslations(
+    id: number,
+    input: SaveTranslationsRequest
+  ): Promise<ArticleRow> {
+    const repository = new ArticlesRepository(this.pool);
+    const article = await repository.findById(id);
+    if (!article) {
+      throw new NotFoundException("Article not found.");
+    }
+
+    const trim = (value?: string | null): string | null | undefined => {
+      if (value === undefined) return undefined;
+      if (value === null) return null;
+      const trimmed = value.trim();
+      return trimmed.length > 0 ? trimmed : null;
+    };
+
+    await repository.updateTranslations(id, {
+      translatedTitle: trim(input.translatedTitle),
+      translatedSubtitle: trim(input.translatedSubtitle),
+      translatedBody: trim(input.translatedBody)
+    });
+
+    const updated = await repository.findById(id);
+    if (!updated) {
+      throw new NotFoundException("Article not found.");
+    }
+
+    return updated;
   }
 
   private async translateToKorean(text: string): Promise<string> {

@@ -127,6 +127,11 @@ export function registerProcessWorker(
         ? new Date(articleData.pubDate)
         : null;
       const imageUrl = articleData.image_url;
+      // NewsData.io country는 전체 국가명 배열(예: ["south korea"])이다.
+      const countryRaw = Array.isArray(articleData.country)
+        ? articleData.country.join(",") || null
+        : articleData.country || null;
+      const country = countryRaw ? countryRaw.substring(0, 255) : null;
 
       // 1. Determine body text
       //    - NewsData.io free tier returns "ONLY AVAILABLE IN PAID PLANS"
@@ -173,6 +178,7 @@ export function registerProcessWorker(
         titleTranslatedAt: translatedTitle ? new Date() : null,
         bodyTranslatedAt: null,
         publisherCredit,
+        country,
         sourceUrl,
         pressTime,
         rawPayload: articleData

@@ -37,6 +37,91 @@
 - [x] Frontend API base URL 환경 변수화: `NEXT_PUBLIC_API_BASE`.
 - [x] Source config CRUD repository/API/UI 기본 구현.
 - [x] `.gitignore` 정상화로 `.env`, build output, runtime thumbnail, temporary script 분리.
+- [x] article `review_state`(PENDING/SELECTED/EXCLUDED) 큐레이션 플래그 도입 (migration 003).
+- [x] article `country` 컬럼 도입 및 기존 데이터 백필 (migration 004).
+- [x] 큐레이션 보드 UI: 탭(미검토/선별됨/발행 대상/제외함) + 검색/페이지네이션 + 체크박스 일괄작업.
+- [x] 번역문 수동 편집 UI/API (제목/부제목/본문).
+
+## 1A. 수동 큐레이션 워크플로 (변경된 우선순위)
+
+> 발행 자동화보다 **뉴스 수집 → 1차 선별 → 번역 → 최종 발행 대상 선별**의 수동 큐레이션이 핵심 가치다.
+> 수동 정리가 충분히 안정화된 뒤 발행 자동화(섹션 6 이후)를 진행한다.
+> 선별은 `status`(생명주기)와 분리된 `review_state` 플래그로 모델링하며, 제외는 hard delete 없이 숨김 보관한다.
+
+### 데이터/상태 모델
+
+- [x] `review_state` 컬럼 추가: `PENDING`(미검토) / `SELECTED`(선별 채택) / `EXCLUDED`(제외·숨김) (migration 003).
+- [x] 최종 발행 대상 선별 = `SELECTED` + `DRAFT` → `READY_TO_PUBLISH` 전환 (WHERE 가드).
+- [x] `EXCLUDED` 기사는 기본 목록에서 숨기고 제외함 탭에서만 노출.
+- [x] `country` 컬럼 추가 및 raw_payload 백필, 신규 수집 시 worker 저장 (migration 004).
+
+### Backend
+
+- [x] `GET /articles?reviewState=...` 필터 추가.
+- [x] `POST /articles/review-state` 일괄 채택/제외/복구.
+- [x] `POST /articles/mark-ready` 최종 발행 대상 확정(일괄).
+- [x] `POST /articles/unmark-ready` 발행 대상 → 선별 단계 되돌리기(일괄, 가드).
+- [x] `PATCH /articles/:id/translations` 번역문 수동 편집 저장.
+
+### Admin UI
+
+- [x] 기사 큐레이션 보드(`/articles`): 4단계 탭 + 검색 + pagination.
+- [x] 체크박스 다중 선택 + 탭별 일괄 액션바.
+- [x] 목록에 국가(country) 컬럼 표시.
+- [x] 상세 화면 번역문 편집기(제목/부제목/본문) + 단건 선별 액션.
+- [x] 상세 메타데이터에 국가 표시.
+- [x] 수동 수집 시작일/종료일 기본값을 오늘로 설정.
+### WP-1. 보드 필터/정렬 확장 (근시일)
+
+목표: 현재 탭(reviewState/status) + 검색 단일 축을 source/정렬까지 확장한다.
+
+- [ ] `GET /articles`에 `sort` 파라미터 추가: `updated_at`(기본) / `created_at` / `press_time`, `order=desc|asc`.
+  - 파일: [articles.repository.ts](packages/db/src/repositories/articles.repository.ts) `list()` — 고정 `ORDER BY a.updated_at DESC, a.id DESC`를 화이트리스트 기반 동적 정렬로 교체(컬럼명은 코드 상수로만, 사용자 입력 직접 주입 금지).
+  - 파일: [articles.controller.ts](apps/backend/src/articles/articles.controller.ts) `list()` 쿼리 파라미터 추가, [articles.service.ts](apps/backend/src/articles/articles.service.ts) `ListArticlesRequest` 확장.
+- [ ] 보드에 source 드롭다운 필터 추가(NEWSDATA 외 향후 NEWSWIRE 대비).
+  - 파일: [ArticleBoard.tsx](apps/frontend/src/app/articles/ArticleBoard.tsx) 검색 폼 옆에 source select, [page.tsx](apps/frontend/src/app/articles/page.tsx) `searchParams.source`를 쿼리에 반영.
+- [ ] 보드에 정렬 드롭다운(수정시간/수집시간/발표시간) 추가.
+- [ ] press_time 컬럼을 보드 목록에 노출(엠바고/최신성 판단용).
+
+### WP-2. 탭별 건수 뱃지 / 번역 현황 집계
+
+목표: 각 단계에 몇 건이 쌓였는지 한눈에 보이게 한다.
+
+- [ ] `GET /articles/review-counts` 추가: review_state별 건수 + `READY_TO_PUBLISH` 건수 반환.
+  - 파일: [articles.repository.ts](packages/db/src/repositories/articles.repository.ts)에 `countByReviewState()` 추가(EXCLUDED 포함), controller/service 위임.
+- [ ] 보드 탭 라벨에 건수 뱃지 표시(미검토 N · 선별됨 N · 발행 대상 N · 제외함 N).
+- [ ] 선별됨 단계의 본문 번역 진행률 표시: `body_translated_at IS NULL` 미번역 건수 집계.
+
+### WP-3. 일괄 번역 큐 연동 (PROJECT_RULES 4 준수)
+
+목표: 현재 단건 본문 번역(`POST /articles/:id/translate-body`)은 DeepL 호출을 **API request 안에서** 실행해 PROJECT_RULES("외부 API 호출은 worker로 분리")에 어긋난다. 일괄 번역 도입과 함께 worker로 이전한다.
+
+- [ ] `packages/shared/src/queues.ts` `QUEUE_NAMES`에 `translate` 큐 추가(또는 process 큐 job type 분기).
+- [ ] translate job 데이터 계약 정의: `{ articleId, target: "BODY" | "TITLE" | "SUBTITLE" }`.
+- [ ] Backend producer: `POST /articles/translate-bodies` `{ ids: number[] }` — 선별됨 다건에 대해 article별 translate job enqueue.
+  - 파일: [queue.providers.ts](apps/backend/src/queue/queue.providers.ts)에 translate 큐 producer 추가, articles.service에서 enqueue.
+- [ ] Worker consumer: `apps/worker/src/queue/register-translate-worker.ts` 신규 — DeepL 호출 후 [articles.repository.ts](packages/db/src/repositories/articles.repository.ts) `updateBodyTranslation` 사용.
+  - 기존 [register-process-worker.ts](apps/worker/src/queue/register-process-worker.ts)의 `translateToKorean` 헬퍼를 공용 모듈로 추출해 재사용.
+- [ ] 단건 `translate-body`도 동일 큐 enqueue 방식으로 이전(동기 DeepL 호출 제거). 호환을 위해 enqueue 후 job id 반환.
+- [ ] 보드 "선별됨" 탭에 `본문 일괄 번역` 액션 추가([ArticleBoard.tsx](apps/frontend/src/app/articles/ArticleBoard.tsx)).
+- [ ] DeepL 사용량/실패 처리: 실패 시 article 변경 없이 재시도(BullMQ retry), 실패 로그 남김.
+
+### WP-4. 큐레이션 → 발행 브리지 (수동 정리 안정화 후 → 섹션 6 연결)
+
+목표: 큐레이션이 끝난 `READY_TO_PUBLISH` 건을 발행 파이프라인에 안전하게 넘기는 최소 연결부. d-maker 실제 DOM은 `[!]`라 1차는 enqueue + 상태 전환 + dry-run까지.
+
+- [ ] `PublishJobsRepository` 추가(섹션 3과 연계): create/find/active job 조회.
+- [ ] `POST /articles/publish` `{ ids: number[] }` — `READY_TO_PUBLISH`만 publish job 생성 + publish 큐 enqueue(가드: 이미 active publish job 있으면 skip).
+- [ ] article 상태 `READY_TO_PUBLISH → PUBLISHING` 전환은 worker 시작 시점에 수행.
+- [ ] publish job 데이터 계약 정의: `{ articleId, publishJobId }` (기사 본문은 worker가 DB 재조회).
+- [ ] dry-run publish worker: 실제 Playwright 없이 상태 전환/로그만 검증(`apps/worker/src/queue/register-publish-worker.ts` 확장).
+- [ ] 보드 "발행 대상" 탭에 `발행 요청` 일괄 액션 추가.
+- [ ] 이후 실제 Playwright 발행은 섹션 6 체크리스트로 이어서 진행.
+
+### 후속(우선순위 낮음)
+
+- [ ] 큐레이션 단계 전환 이력/감사 로그(누가/언제 review_state·status 변경).
+- [ ] 번역문 버전 보관(편집 전/후 비교).
 
 ## 2. 기반 정리
 
@@ -84,7 +169,7 @@
 - [x] NewsData.io category 18개 다중 선택 UI 추가.
 - [x] NewsData.io country/language/domainurl 쉼표 구분 입력 UI 추가.
 - [x] NewsData.io prioritydomain 선택 UI 추가.
-- [ ] 기사 목록 화면 추가: 검색, source/status 필터, pagination.
+- [x] 기사 목록(큐레이션 보드) 화면 추가: 탭/검색/pagination + 국가 컬럼. (섹션 1A 참고)
 - [ ] Draft 상세에서 발행 요청 버튼 추가.
 - [ ] 발행 요청 중/완료/실패 상태 표시.
 - [ ] 발행 queue 상태 화면 추가.
@@ -147,6 +232,8 @@
 - [x] duplicate count 계산 구현.
 - [ ] image/video는 원본 전체 사용이 아닌 thumbnail 처리 정책으로 제한했는지 재확인.
 - [ ] publisher credit 표시/저장 검증.
+- [x] country(국가) 저장 및 목록/상세 표시: raw_payload country 배열을 컬럼으로 정규화.
+- [x] 수동 수집 from_date/to_date 기본값을 오늘로 설정.
 - [ ] auto publish policy 적용: 기본 `DRAFT`, 설정 시 `READY_TO_PUBLISH`.
 
 ## 9. Newswire 수집/처리
@@ -203,12 +290,13 @@
 
 - [x] `npm run typecheck` 통과.
 - [x] `npm run build` 통과.
-- [ ] local DB migration clean apply 검증.
+- [~] local DB migration clean apply 검증: 001 자동 mount, 002 적용 가정. 003(review_state)/004(country)는 로컬 `newsdata` DB에 적용·백필 완료. 신규 환경에서 001~004 순차 clean apply는 재검증 필요.
 - [ ] backend boot 검증.
 - [ ] frontend boot 검증.
 - [ ] worker boot 검증.
 - [~] manual NewsData fetch end-to-end 검증: typecheck 통과, 실제 API/DB/worker runtime 검증 필요.
 - [ ] Draft article detail view 검증.
+- [ ] 큐레이션 보드 end-to-end 검증: 일괄 채택/제외/복구, 최종 확정/되돌리기, 번역 편집 저장.
 - [ ] source config CRUD end-to-end 검증.
 - [ ] publish request API 검증.
 - [ ] publish worker dry-run 검증.
@@ -217,16 +305,21 @@
 
 ## 14. 권장 구현 순서
 
-1. 기반 정리 및 현재 변경분 커밋.
-2. DB repository 확장: publish/log/artifact/callback.
-3. 수동 발행 요청 API + publish queue enqueue.
-4. Draft 상세 UI 발행 요청 버튼.
-5. publish worker를 article id 기반으로 재구성.
-6. Playwright selector map 및 storageState 구현.
-7. d-maker 실제 submit/검증/publish log/failure artifact 구현.
-8. callback worker 구현.
-9. source config 기반 자동 수집 scheduler 구현.
-10. Newswire sample 확보 후 Newswire fetch/process/callback 완성.
+> 우선순위 변경: 수동 큐레이션 워크플로(섹션 1A)를 먼저 완성한다. 발행 자동화는 그 이후.
+
+0. [x] 수동 큐레이션 워크플로 1차: review_state/country, 큐레이션 보드, 번역 편집, 일괄 선별/확정. (섹션 1A)
+1. 보드 필터/정렬 확장 + 탭별 건수·번역 현황. (WP-1, WP-2)
+2. 일괄 번역 큐 연동 및 단건 번역 worker 이전. (WP-3)
+3. 큐레이션 → 발행 브리지: publish job/enqueue/상태전환/dry-run. (WP-4)
+4. 기반 정리 및 현재 변경분 커밋.
+5. DB repository 확장: publish/log/artifact/callback. (WP-4의 PublishJobsRepository 포함)
+6. Draft/발행 대상 상세 UI 발행 요청 버튼.
+7. publish worker를 article id 기반으로 재구성.
+8. Playwright selector map 및 storageState 구현.
+9. d-maker 실제 submit/검증/publish log/failure artifact 구현.
+10. callback worker 구현.
+11. source config 기반 자동 수집 scheduler 구현.
+12. Newswire sample 확보 후 Newswire fetch/process/callback 완성.
 ## 15. Manual NewsData.io Fetch Updates
 
 - [x] NewsData.io category supports 18 allowed values.

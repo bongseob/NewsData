@@ -54,6 +54,14 @@ function joinSelectedValues(values: readonly string[]): string {
   return values.join(",");
 }
 
+function todayLocal(): string {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
 function safeParse(value: string): unknown {
   try {
     return JSON.parse(value);
@@ -111,6 +119,15 @@ export function ManualFetchManager(): JSX.Element {
   useEffect(() => {
     void loadJobs();
   }, [loadJobs]);
+
+  // 시작일/종료일 기본값을 오늘로 설정한다.
+  // 서버/클라이언트 타임존 차이로 인한 hydration 불일치를 피하기 위해
+  // 렌더 시점이 아니라 마운트 후 클라이언트 기준 오늘 날짜를 채운다.
+  useEffect(() => {
+    const today = todayLocal();
+    setFromDate((current) => current || today);
+    setToDate((current) => current || today);
+  }, []);
 
   const toggleCategory = (category: NewsDataCategory) => {
     setMessage(null);
