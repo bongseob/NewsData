@@ -1,14 +1,15 @@
-import { Worker, Queue, type ConnectionOptions } from "bullmq";
+import { Queue, Worker, type ConnectionOptions } from "bullmq";
 import axios from "axios";
 import {
-  QUEUE_NAMES,
   ARTICLE_SOURCES,
   JOB_STATUSES,
-  type NewsDataResponse,
+  QUEUE_NAMES,
+  type FetchJobData,
   type NewsDataFetchQuery,
-  type FetchJobData
+  type NewsDataResponse
 } from "@newsdata/shared";
 import {
+  ArticlesRepository,
   createMysqlPool,
   FetchJobsRepository,
   type MysqlPool
@@ -16,7 +17,6 @@ import {
 
 const MAX_PAGES = 5;
 
-// ── DB pool (워커 전역에서 재사용) ──────────────────────────────────
 const pool: MysqlPool = createMysqlPool({
   host: process.env.MYSQL_HOST || "localhost",
   port: parseInt(process.env.MYSQL_PORT || "3306", 10),
@@ -26,10 +26,7 @@ const pool: MysqlPool = createMysqlPool({
 });
 
 const fetchJobsRepo = new FetchJobsRepository(pool);
-
-// ────────────────────────────────────────────────────────────────────
-// Helpers
-// ────────────────────────────────────────────────────────────────────
+const articlesRepo = new ArticlesRepository(pool);
 
 function buildNewsDataUrl(
   apiKey: string,
@@ -49,17 +46,24 @@ function buildNewsDataUrl(
     if (query.from_date) params.set("from_date", query.from_date);
     if (query.to_date) params.set("to_date", query.to_date);
     if (query.domain) params.set("domain", query.domain);
-    if (query.removeduplicate !== undefined)
+    if (query.domainurl) params.set("domainurl", query.domainurl);
+    if (query.prioritydomain) params.set("prioritydomain", query.prioritydomain);
+    if (query.removeduplicate !== undefined) {
       params.set("removeduplicate", String(query.removeduplicate));
+    }
     if (query.size) params.set("size", String(query.size));
   }
 
   return `https://newsdata.io/api/1/news?${params.toString()}`;
 }
 
-// ────────────────────────────────────────────────────────────────────
-// Worker
-// ────────────────────────────────────────────────────────────────────
+function redactApiKey(url: string): string {
+  const parsed = new URL(url);
+  if (parsed.searchParams.has("apikey")) {
+    parsed.searchParams.set("apikey", "[redacted]");
+  }
+  return parsed.toString();
+}
 
 export function registerFetchWorker(connection: ConnectionOptions): Worker {
   const processQueue = new Queue(QUEUE_NAMES.process, { connection });
@@ -73,26 +77,34 @@ export function registerFetchWorker(connection: ConnectionOptions): Worker {
         throw new Error(`Unsupported source for this worker: ${source}`);
       }
 
+      const fetchJob = await fetchJobsRepo.findById(fetchJobId);
+      if (fetchJob?.status === JOB_STATUSES.canceled) {
+        console.log(`[Fetch] Job ${job.id} skipped canceled fetchJobId=${fetchJobId}`);
+        return {
+          skipped: true,
+          reason: "canceled"
+        };
+      }
+
       const apiKey = process.env.NEWSDATA_API_KEY;
       if (!apiKey) {
         throw new Error("NEWSDATA_API_KEY is not set");
       }
 
-      console.log(`[Fetch] Job ${job.id} started — fetchJobId=${fetchJobId}`);
-
-      // 1. fetch_jobs 상태를 RUNNING으로 변경
+      console.log(`[Fetch] Job ${job.id} started fetchJobId=${fetchJobId}`);
       await fetchJobsRepo.updateStatus(fetchJobId, JOB_STATUSES.running);
 
-      const fetchQuery: NewsDataFetchQuery = query as NewsDataFetchQuery;
+      const fetchQuery = query as NewsDataFetchQuery;
       let nextPage: string | undefined;
+      let pageNum = 0;
+      let pagesFetched = 0;
       let totalCollected = 0;
       let totalDuplicates = 0;
-      let pageNum = 0;
+      let totalQueued = 0;
 
-      // 2. 페이지네이션 루프
       while (pageNum < MAX_PAGES) {
         const url = buildNewsDataUrl(apiKey, fetchQuery, nextPage);
-        console.log(`[Fetch] Page ${pageNum + 1} — GET ${url}`);
+        console.log(`[Fetch] Page ${pageNum + 1} GET ${redactApiKey(url)}`);
 
         const response = await axios.get<NewsDataResponse>(url, {
           timeout: 15000,
@@ -100,22 +112,31 @@ export function registerFetchWorker(connection: ConnectionOptions): Worker {
         });
 
         const data = response.data;
-
-        // API 수준 에러 체크
         if (data.status && data.status !== "success") {
-          throw new Error(
-            `NewsData.io API returned status: ${data.status}`
-          );
+          throw new Error(`NewsData.io API returned status: ${data.status}`);
         }
 
+        pagesFetched++;
         const articles = data.results ?? [];
         if (articles.length === 0) {
           console.log(`[Fetch] No more results on page ${pageNum + 1}.`);
           break;
         }
 
-        // 3. 수집된 각 기사 → process 큐에 적재
         for (const article of articles) {
+          if (!article.article_id) {
+            console.warn("[Fetch] Skipping NewsData.io article without article_id.");
+            continue;
+          }
+
+          const existing = await articlesRepo.findBySourceExternalId(
+            ARTICLE_SOURCES.newsdata,
+            article.article_id
+          );
+          if (existing) {
+            totalDuplicates++;
+          }
+
           await processQueue.add(
             "process-article",
             {
@@ -124,19 +145,18 @@ export function registerFetchWorker(connection: ConnectionOptions): Worker {
               fetchJobId
             },
             {
-              jobId: `newsdata-${article.article_id}`,
-              // 동일 article_id 중복 적재 방지
+              jobId: `newsdata-${fetchJobId}-${article.article_id}`,
               removeOnComplete: 100,
               removeOnFail: 200
             }
           );
           totalCollected++;
+          totalQueued++;
         }
 
-        // 4. 다음 페이지 확인
         nextPage = data.nextPage ?? undefined;
         if (!nextPage) {
-          console.log(`[Fetch] No nextPage token — pagination complete.`);
+          console.log("[Fetch] No nextPage token. Pagination complete.");
           break;
         }
 
@@ -144,13 +164,12 @@ export function registerFetchWorker(connection: ConnectionOptions): Worker {
       }
 
       console.log(
-        `[Fetch] Job ${job.id} done — collected=${totalCollected}, duplicates=${totalDuplicates}, pages=${pageNum + 1}`
+        `[Fetch] Job ${job.id} done collected=${totalCollected}, queued=${totalQueued}, existing=${totalDuplicates}, pages=${pagesFetched}`
       );
 
-      // 5. fetch_jobs → SUCCEEDED
       await fetchJobsRepo.updateStatus(fetchJobId, JOB_STATUSES.succeeded);
 
-      return { totalCollected, totalDuplicates, pages: pageNum + 1 };
+      return { totalCollected, totalQueued, totalDuplicates, pages: pagesFetched };
     },
     {
       connection,
@@ -158,12 +177,11 @@ export function registerFetchWorker(connection: ConnectionOptions): Worker {
     }
   );
 
-  // Worker 레벨 에러 핸들링
   worker.on("failed", async (job, err) => {
     if (!job) return;
     const { fetchJobId } = job.data as FetchJobData;
     console.error(
-      `[Fetch] Job ${job.id} FAILED — fetchJobId=${fetchJobId}: ${err.message}`
+      `[Fetch] Job ${job.id} FAILED fetchJobId=${fetchJobId}: ${err.message}`
     );
     if (fetchJobId) {
       await fetchJobsRepo.updateStatus(

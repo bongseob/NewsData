@@ -16,11 +16,22 @@ export interface FetchJobRow extends RowDataPacket {
   updated_at: Date;
 }
 
+export interface FetchJobListCountRow extends RowDataPacket {
+  total: number;
+}
+
 export interface CreateFetchJobInput {
   source: ArticleSource;
   triggerType: JobTriggerType;
   status: JobStatus;
-  requestPayload?: Record<string, unknown> | null;
+  requestPayload?: unknown | null;
+}
+
+export interface ListFetchJobsInput {
+  source?: ArticleSource;
+  status?: JobStatus;
+  limit?: number;
+  offset?: number;
 }
 
 export class FetchJobsRepository {
@@ -59,6 +70,56 @@ export class FetchJobsRepository {
     );
 
     return rows[0] ?? null;
+  }
+
+  private buildListWhere(input: ListFetchJobsInput): {
+    sql: string;
+    params: Record<string, string | number>;
+  } {
+    const where: string[] = [];
+    const params: Record<string, string | number> = {};
+
+    if (input.source) {
+      where.push("source = :source");
+      params.source = input.source;
+    }
+
+    if (input.status) {
+      where.push("status = :status");
+      params.status = input.status;
+    }
+
+    return {
+      sql: where.length > 0 ? `WHERE ${where.join(" AND ")}` : "",
+      params
+    };
+  }
+
+  async list(input: ListFetchJobsInput = {}): Promise<FetchJobRow[]> {
+    const { sql: whereSql, params } = this.buildListWhere(input);
+    const limit = Math.min(Math.max(input.limit ?? 20, 1), 100);
+    const offset = Math.max(input.offset ?? 0, 0);
+
+    const [rows] = await this.db.execute<FetchJobRow[]>(
+      `SELECT *
+       FROM fetch_jobs
+       ${whereSql}
+       ORDER BY created_at DESC, id DESC
+       LIMIT ${limit} OFFSET ${offset}`,
+      params
+    );
+
+    return rows;
+  }
+
+  async count(input: ListFetchJobsInput = {}): Promise<number> {
+    const { sql: whereSql, params } = this.buildListWhere(input);
+    const [rows] = await this.db.execute<FetchJobListCountRow[]>(
+      `SELECT COUNT(*) AS total FROM fetch_jobs ${whereSql}`,
+      params
+    );
+
+    return rows[0]?.total ?? 0;
   }
 
   async updateStatus(

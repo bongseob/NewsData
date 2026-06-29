@@ -2,8 +2,8 @@ import Link from "next/link";
 
 const navItems = [
   { label: "대시보드", href: "/" },
-  { label: "수집 설정", href: "#" },
-  { label: "수동 수집", href: "#" },
+  { label: "수집 설정", href: "/settings" },
+  { label: "수동 수집", href: "/manual-fetch" },
   { label: "기사 목록", href: "#" },
   { label: "Draft 검수", href: "/drafts" },
   { label: "발행 요청", href: "#" },

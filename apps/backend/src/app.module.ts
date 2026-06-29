@@ -9,6 +9,8 @@ import { HealthController } from "./health.controller.js";
 import { JobsController } from "./jobs/jobs.controller.js";
 import { JobsService } from "./jobs/jobs.service.js";
 import { queueProviders } from "./queue/queue.providers.js";
+import { SourceConfigsController } from "./source-configs/source-configs.controller.js";
+import { SourceConfigsService } from "./source-configs/source-configs.service.js";
 
 @Module({
   imports: [
@@ -21,12 +23,13 @@ import { queueProviders } from "./queue/queue.providers.js";
       },
     }),
   ],
-  controllers: [HealthController, JobsController, ArticlesController],
+  controllers: [HealthController, JobsController, ArticlesController, SourceConfigsController],
   providers: [
     ...databaseProviders,
     ...queueProviders,
     ArticlesService,
-    JobsService
+    JobsService,
+    SourceConfigsService
   ]
 })
 export class AppModule {}

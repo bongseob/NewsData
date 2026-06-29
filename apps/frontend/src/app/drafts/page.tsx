@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { Sidebar } from "../components/Sidebar";
-
-const API_BASE = "http://127.0.0.1:4000";
+import { API_BASE } from "../../lib/api-base";
 
 async function getDrafts() {
   try {
@@ -10,7 +9,8 @@ async function getDrafts() {
       { cache: "no-store" }
     );
     if (!res.ok) return [];
-    return await res.json();
+    const data = await res.json();
+    return Array.isArray(data) ? data : data.items ?? [];
   } catch {
     return [];
   }

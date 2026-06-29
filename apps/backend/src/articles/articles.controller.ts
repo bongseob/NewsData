@@ -4,6 +4,7 @@ import {
   Inject,
   NotFoundException,
   Param,
+  Post,
   Query
 } from "@nestjs/common";
 import type { ArticleSource, ArticleStatus } from "@newsdata/shared";
@@ -16,18 +17,25 @@ export class ArticlesController {
   ) {}
 
   @Get()
-  list(
+  async list(
     @Query("status") status?: ArticleStatus,
     @Query("source") source?: ArticleSource,
+    @Query("search") search?: string,
     @Query("limit") limit?: string,
     @Query("offset") offset?: string
   ) {
-    return this.articlesService.list({
+    const input = {
       status,
       source,
+      search,
       limit: limit ? Number(limit) : undefined,
       offset: offset ? Number(offset) : undefined
-    });
+    };
+    const [items, total] = await Promise.all([
+      this.articlesService.list(input),
+      this.articlesService.count(input)
+    ]);
+    return { items, total };
   }
 
   @Get("status-counts")
@@ -43,5 +51,10 @@ export class ArticlesController {
     }
 
     return article;
+  }
+
+  @Post(":id/translate-body")
+  translateBody(@Param("id") id: string) {
+    return this.articlesService.translateBody(Number(id));
   }
 }

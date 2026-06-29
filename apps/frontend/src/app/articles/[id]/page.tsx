@@ -1,19 +1,58 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Sidebar } from "../../components/Sidebar";
+import { API_BASE } from "../../../lib/api-base";
+import { BodyTranslationButton } from "./BodyTranslationButton";
 
-const API_BASE = "http://127.0.0.1:4000";
+interface ArticleDetail {
+  id: number;
+  source: string;
+  external_id: string;
+  status: string;
+  title: string;
+  subtitle: string | null;
+  body: string | null;
+  original_title: string | null;
+  original_subtitle: string | null;
+  original_body: string | null;
+  translated_title: string | null;
+  translated_subtitle: string | null;
+  translated_body: string | null;
+  title_translated_at: string | null;
+  body_translated_at: string | null;
+  publisher_credit: string | null;
+  source_url: string | null;
+  press_time: string | null;
+  raw_payload: unknown;
+  created_at: string | null;
+  updated_at: string | null;
+  thumbnail_local_path?: string | null;
+}
 
-async function getArticle(id: string) {
+async function getArticle(id: string): Promise<ArticleDetail | null> {
   try {
     const res = await fetch(`${API_BASE}/articles/${id}`, {
       cache: "no-store"
     });
     if (!res.ok) return null;
-    return await res.json();
+    return (await res.json()) as ArticleDetail;
   } catch {
     return null;
   }
+}
+
+function stringifyPayload(payload: unknown): string {
+  try {
+    const parsed =
+      typeof payload === "string" ? JSON.parse(payload) : payload;
+    return JSON.stringify(parsed, null, 2);
+  } catch {
+    return String(payload);
+  }
+}
+
+function formatDate(value: string | null): string {
+  return value ? new Date(value).toLocaleString("ko-KR") : "N/A";
 }
 
 export default async function ArticleDetailPage({
@@ -30,25 +69,16 @@ export default async function ArticleDetailPage({
   const thumbnail = article.thumbnail_local_path
     ? `${API_BASE}/uploads/thumbnails/${article.thumbnail_local_path.split("/").pop()}`
     : null;
-
-  // raw_payload는 JSON 문자열 또는 객체로 저장되어 있을 수 있음
-  let rawPayloadStr: string;
-  try {
-    const parsed =
-      typeof article.raw_payload === "string"
-        ? JSON.parse(article.raw_payload)
-        : article.raw_payload;
-    rawPayloadStr = JSON.stringify(parsed, null, 2);
-  } catch {
-    rawPayloadStr = String(article.raw_payload);
-  }
+  const rawPayloadStr = stringifyPayload(article.raw_payload);
+  const originalBody = article.original_body || article.body;
+  const translatedBody = article.translated_body;
+  const displayTitle = article.translated_title || article.title;
 
   return (
     <main className="min-h-screen bg-[#f4f6f8] text-ink-950">
       <div className="grid min-h-screen grid-cols-1 lg:grid-cols-[264px_1fr]">
         <Sidebar active="Draft 검수" />
         <section className="px-5 py-6 sm:px-8 lg:px-10">
-          {/* Breadcrumb */}
           <div className="mb-5 flex items-center gap-2 text-sm text-ink-500">
             <Link href="/drafts" className="hover:text-[#0f5f9f]">
               Draft 검수
@@ -58,10 +88,9 @@ export default async function ArticleDetailPage({
           </div>
 
           <div className="grid gap-5 xl:grid-cols-[1fr_480px]">
-            {/* ── Left: Article content ── */}
             <div className="space-y-5">
-              <div className="rounded-lg border border-line bg-white p-6 shadow-panel">
-                <div className="mb-4 flex items-center gap-2">
+              <article className="rounded-lg border border-line bg-white p-6 shadow-panel">
+                <div className="mb-4 flex flex-wrap items-center gap-2">
                   <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-ink-700">
                     {article.status}
                   </span>
@@ -71,14 +100,34 @@ export default async function ArticleDetailPage({
                   <span className="text-xs text-slate-400">
                     &middot; {article.publisher_credit || "N/A"}
                   </span>
+                  {article.title_translated_at && (
+                    <span className="rounded-full bg-blue-50 px-2.5 py-1 text-xs font-semibold text-blue-700">
+                      제목 번역 완료
+                    </span>
+                  )}
+                  {article.body_translated_at ? (
+                    <span className="rounded-full bg-green-50 px-2.5 py-1 text-xs font-semibold text-green-700">
+                      본문 번역 완료
+                    </span>
+                  ) : (
+                    <span className="rounded-full bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-700">
+                      본문 미번역
+                    </span>
+                  )}
                 </div>
 
                 <h2 className="text-xl font-bold leading-snug">
-                  {article.title}
+                  {displayTitle}
                 </h2>
 
+                {article.original_title && article.original_title !== displayTitle && (
+                  <p className="mt-2 text-xs text-ink-500">
+                    원문 제목: {article.original_title}
+                  </p>
+                )}
+
                 {article.subtitle && (
-                  <p className="mt-2 text-sm text-ink-500">
+                  <p className="mt-3 text-sm text-ink-500">
                     {article.subtitle}
                   </p>
                 )}
@@ -87,23 +136,49 @@ export default async function ArticleDetailPage({
                   <div className="mt-5 overflow-hidden rounded-lg">
                     <img
                       src={thumbnail}
-                      alt={article.title}
+                      alt={displayTitle}
                       className="w-full"
                     />
                   </div>
                 )}
 
-                {article.body && (
-                  <div className="mt-5 whitespace-pre-wrap text-sm leading-relaxed text-ink-700">
-                    {article.body}
-                  </div>
+                <div className="mt-5">
+                  <BodyTranslationButton
+                    articleId={article.id}
+                    disabled={!originalBody}
+                  />
+                </div>
+
+                {translatedBody ? (
+                  <section className="mt-6">
+                    <div className="mb-2 flex items-center justify-between gap-3">
+                      <h3 className="text-sm font-bold">번역 본문</h3>
+                      <span className="text-xs text-ink-500">
+                        {formatDate(article.body_translated_at)}
+                      </span>
+                    </div>
+                    <div className="whitespace-pre-wrap rounded-md bg-slate-50 p-4 text-sm leading-relaxed text-ink-700">
+                      {translatedBody}
+                    </div>
+                  </section>
+                ) : (
+                  <section className="mt-6 rounded-md bg-amber-50 p-4 text-sm text-amber-800">
+                    본문은 아직 번역하지 않았습니다. 필요할 때만 위 버튼으로 번역하세요.
+                  </section>
                 )}
-              </div>
+
+                {originalBody && (
+                  <section className="mt-6">
+                    <h3 className="mb-2 text-sm font-bold">원문 본문</h3>
+                    <div className="whitespace-pre-wrap rounded-md border border-line p-4 text-sm leading-relaxed text-ink-700">
+                      {originalBody}
+                    </div>
+                  </section>
+                )}
+              </article>
             </div>
 
-            {/* ── Right: Metadata + Raw payload ── */}
             <div className="space-y-5">
-              {/* Metadata */}
               <div className="rounded-lg border border-line bg-white p-5 shadow-panel">
                 <h3 className="mb-3 text-sm font-bold">메타데이터</h3>
                 <dl className="space-y-2 text-xs">
@@ -133,31 +208,24 @@ export default async function ArticleDetailPage({
                   <div className="flex justify-between gap-3">
                     <dt className="text-ink-500">press_time</dt>
                     <dd className="text-ink-700">
-                      {article.press_time
-                        ? new Date(article.press_time).toLocaleString("ko-KR")
-                        : "N/A"}
+                      {formatDate(article.press_time)}
                     </dd>
                   </div>
                   <div className="flex justify-between gap-3">
                     <dt className="text-ink-500">created_at</dt>
                     <dd className="text-ink-700">
-                      {article.created_at
-                        ? new Date(article.created_at).toLocaleString("ko-KR")
-                        : "N/A"}
+                      {formatDate(article.created_at)}
                     </dd>
                   </div>
                   <div className="flex justify-between gap-3">
                     <dt className="text-ink-500">updated_at</dt>
                     <dd className="text-ink-700">
-                      {article.updated_at
-                        ? new Date(article.updated_at).toLocaleString("ko-KR")
-                        : "N/A"}
+                      {formatDate(article.updated_at)}
                     </dd>
                   </div>
                 </dl>
               </div>
 
-              {/* Raw payload */}
               <div className="rounded-lg border border-line bg-white p-5 shadow-panel">
                 <h3 className="mb-3 text-sm font-bold">원본 Payload</h3>
                 <pre className="max-h-[600px] overflow-auto rounded-md bg-slate-900 p-4 text-xs leading-relaxed text-slate-100">

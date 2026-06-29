@@ -2,6 +2,7 @@ import Link from "next/link";
 import { ARTICLE_STATUSES } from "@newsdata/shared";
 import { FetchButton } from "./FetchButton";
 import { Sidebar } from "./components/Sidebar";
+import { API_BASE } from "../lib/api-base";
 
 const statusLabels: Record<string, string> = {
   DRAFT: "검수 대기",
@@ -13,15 +14,14 @@ const statusLabels: Record<string, string> = {
   DELETED: "비노출"
 };
 
-const API_BASE = "http://127.0.0.1:4000";
-
 async function getArticles() {
   try {
     const res = await fetch(`${API_BASE}/articles?limit=10`, {
       cache: "no-store"
     });
     if (!res.ok) return [];
-    return await res.json();
+    const data = await res.json();
+    return Array.isArray(data) ? data : data.items ?? [];
   } catch {
     return [];
   }

@@ -1,10 +1,24 @@
-1.  **Analyze the Request:**
-    *   Original Code: A `.gitignore` file content.
-    *   Suggested Edit: Appends several new lines to the `.gitignore` file.
-    *   Task: Apply the suggested edit to the original code and output the complete modified file.
-    *   Constraints: Output ONLY code. No explanations. Preserve unchanged code/comments exactly.
+node_modules/
 
-2.  **Compare Original and Suggested Edit:**
-    *   *Original:*
+# Environment files
+.env
+.env.*
+!.env.example
 
-node_modules
+# Build outputs
+dist/
+.next/
+out/
+build/
+*.tsbuildinfo
+
+# Runtime uploads and artifacts
+apps/backend/uploads/thumbnails/
+playwright-artifacts/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Temporary agent scripts
+tmp-*.js

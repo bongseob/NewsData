@@ -149,24 +149,29 @@ export function registerProcessWorker(
         }
       }
 
-      // 2. Translate (English -> Korean)
-      console.log(`[Process] Translating article ${externalId}...`);
+      // 2. Translate title only. Body translation is triggered manually from admin UI.
+      console.log(`[Process] Translating title only for article ${externalId}...`);
       const translatedTitle = await translateToKorean(title);
-      const translatedSubtitle = await translateToKorean(subtitle);
-      const translatedBody = await translateToKorean(body);
+      const storedTitle = translatedTitle || title || "No Title";
 
       // 3. Upsert Article (DRAFT)
       const articleId = await articlesRepo.upsertCollectedArticle({
         source: ARTICLE_SOURCES.newsdata,
         externalId,
         status: ARTICLE_STATUSES.draft,
-        title: translatedTitle
+        title: storedTitle.substring(0, 500),
+        subtitle: subtitle ? subtitle.substring(0, 500) : null,
+        body,
+        originalTitle: title ? title.substring(0, 500) : null,
+        originalSubtitle: subtitle ? subtitle.substring(0, 500) : null,
+        originalBody: body,
+        translatedTitle: translatedTitle
           ? translatedTitle.substring(0, 500)
-          : "No Title",
-        subtitle: translatedSubtitle
-          ? translatedSubtitle.substring(0, 500)
           : null,
-        body: translatedBody,
+        translatedSubtitle: null,
+        translatedBody: null,
+        titleTranslatedAt: translatedTitle ? new Date() : null,
+        bodyTranslatedAt: null,
         publisherCredit,
         sourceUrl,
         pressTime,
