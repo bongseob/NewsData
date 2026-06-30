@@ -14,6 +14,7 @@ import type {
   ArticleSource,
   ArticleStatus
 } from "@newsdata/shared";
+import type { ArticleSortColumn, ArticleSortOrder } from "@newsdata/db";
 import { ArticlesService } from "./articles.service.js";
 
 @Controller("articles")
@@ -28,6 +29,8 @@ export class ArticlesController {
     @Query("reviewState") reviewState?: ArticleReviewState,
     @Query("source") source?: ArticleSource,
     @Query("search") search?: string,
+    @Query("sort") sort?: string,
+    @Query("order") order?: string,
     @Query("limit") limit?: string,
     @Query("offset") offset?: string
   ) {
@@ -36,6 +39,8 @@ export class ArticlesController {
       reviewState,
       source,
       search,
+      sort: sort as ArticleSortColumn | undefined,
+      order: order as ArticleSortOrder | undefined,
       limit: limit ? Number(limit) : undefined,
       offset: offset ? Number(offset) : undefined
     };
@@ -49,6 +54,11 @@ export class ArticlesController {
   @Get("status-counts")
   countByStatus() {
     return this.articlesService.countByStatus();
+  }
+
+  @Get("review-counts")
+  countByReviewState() {
+    return this.articlesService.countByReviewState();
   }
 
   @Post("review-state")

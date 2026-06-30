@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(grep -E '\\\\.\\(ts|tsx|sql|json|md|yaml|yml|example\\)$')",
+      "Bash(npm run *)",
+      "Bash(git commit -m ' *)"
+    ]
+  }
+}

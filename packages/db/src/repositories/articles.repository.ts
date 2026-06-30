@@ -46,11 +46,30 @@ export interface ArticleListCountRow extends RowDataPacket {
   total: number;
 }
 
+export interface ReviewStateCountRow extends RowDataPacket {
+  review_state: ArticleReviewState;
+  ready_count: number | null;
+  total: number;
+  translated: number;
+  untranslated: number;
+}
+
+export type ArticleSortColumn = "updated_at" | "created_at" | "press_time";
+export type ArticleSortOrder = "asc" | "desc";
+
+const SORT_COLUMN_MAP: Record<ArticleSortColumn, string> = {
+  updated_at: "a.updated_at",
+  created_at: "a.created_at",
+  press_time: "a.press_time"
+};
+
 export interface ListArticlesInput {
   status?: ArticleStatus;
   reviewState?: ArticleReviewState;
   source?: ArticleSource;
   search?: string;
+  sort?: ArticleSortColumn;
+  order?: ArticleSortOrder;
   limit?: number;
   offset?: number;
 }
@@ -236,17 +255,20 @@ export class ArticlesRepository {
     return { sql, params };
   }
 
-  async list(input: ListArticlesInput = {}): Promise<ArticleRow[]> {
+    async list(input: ListArticlesInput = {}): Promise<ArticleRow[]> {
     const { sql: whereSql, params } = this.buildListWhere(input);
     const limit = Math.min(Math.max(input.limit ?? 50, 1), 100);
     const offset = Math.max(input.offset ?? 0, 0);
+
+    const sortCol = SORT_COLUMN_MAP[input.sort ?? "updated_at"];
+    const order = input.order === "asc" ? "ASC" : "DESC";
 
     const [rows] = await this.db.execute<ArticleRow[]>(
       `SELECT a.*, aa.local_path as thumbnail_local_path
        FROM articles a
        LEFT JOIN article_assets aa ON a.id = aa.article_id AND aa.asset_type = 'THUMBNAIL'
        ${whereSql}
-       ORDER BY a.updated_at DESC, a.id DESC
+       ORDER BY ${sortCol} ${order}, a.id DESC
        LIMIT ${limit} OFFSET ${offset}`,
       params
     );
@@ -265,12 +287,36 @@ export class ArticlesRepository {
     return rows[0]?.total ?? 0;
   }
 
-  async countByStatus(): Promise<ArticleStatusCountRow[]> {
+    async countByStatus(): Promise<ArticleStatusCountRow[]> {
     const [rows] = await this.db.execute<ArticleStatusCountRow[]>(
       `SELECT status, COUNT(*) AS count
        FROM articles
        GROUP BY status
        ORDER BY status`
+    );
+
+    return rows;
+  }
+
+    /**
+   * review_state별 건수와 번역 현황을 집계한다.
+   * - PENDING / SELECTED / EXCLUDED: review_state 기준 집계
+   * - READY_TO_PUBLISH: status 기준 별도 집계
+   * 각 그룹의 total, translated(body_translated_at IS NOT NULL), untranslated 건수를 반환한다.
+   */
+  async countByReviewState(): Promise<ReviewStateCountRow[]> {
+    const [rows] = await this.db.execute<ReviewStateCountRow[]>(
+      `SELECT
+         review_state,
+         SUM(CASE WHEN status = :readyStatus THEN 1 ELSE 0 END) AS ready_count,
+         COUNT(*) AS total,
+         SUM(CASE WHEN body_translated_at IS NOT NULL THEN 1 ELSE 0 END) AS translated,
+         SUM(CASE WHEN body_translated_at IS NULL THEN 1 ELSE 0 END) AS untranslated
+       FROM articles
+       GROUP BY review_state`,
+      {
+        readyStatus: ARTICLE_STATUSES.readyToPublish
+      }
     );
 
     return rows;

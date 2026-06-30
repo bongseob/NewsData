@@ -75,22 +75,22 @@
 
 목표: 현재 탭(reviewState/status) + 검색 단일 축을 source/정렬까지 확장한다.
 
-- [ ] `GET /articles`에 `sort` 파라미터 추가: `updated_at`(기본) / `created_at` / `press_time`, `order=desc|asc`.
+- [x] `GET /articles`에 `sort` 파라미터 추가: `updated_at`(기본) / `created_at` / `press_time`, `order=desc|asc`.
   - 파일: [articles.repository.ts](packages/db/src/repositories/articles.repository.ts) `list()` — 고정 `ORDER BY a.updated_at DESC, a.id DESC`를 화이트리스트 기반 동적 정렬로 교체(컬럼명은 코드 상수로만, 사용자 입력 직접 주입 금지).
   - 파일: [articles.controller.ts](apps/backend/src/articles/articles.controller.ts) `list()` 쿼리 파라미터 추가, [articles.service.ts](apps/backend/src/articles/articles.service.ts) `ListArticlesRequest` 확장.
-- [ ] 보드에 source 드롭다운 필터 추가(NEWSDATA 외 향후 NEWSWIRE 대비).
+- [x] 보드에 source 드롭다운 필터 추가(NEWSDATA 외 향후 NEWSWIRE 대비).
   - 파일: [ArticleBoard.tsx](apps/frontend/src/app/articles/ArticleBoard.tsx) 검색 폼 옆에 source select, [page.tsx](apps/frontend/src/app/articles/page.tsx) `searchParams.source`를 쿼리에 반영.
-- [ ] 보드에 정렬 드롭다운(수정시간/수집시간/발표시간) 추가.
-- [ ] press_time 컬럼을 보드 목록에 노출(엠바고/최신성 판단용).
+- [x] 보드에 정렬 드롭다운(수정시간/수집시간/발표시간) 추가.
+- [x] press_time 컬럼을 보드 목록에 노출(엠바고/최신성 판단용).
 
 ### WP-2. 탭별 건수 뱃지 / 번역 현황 집계
 
 목표: 각 단계에 몇 건이 쌓였는지 한눈에 보이게 한다.
 
-- [ ] `GET /articles/review-counts` 추가: review_state별 건수 + `READY_TO_PUBLISH` 건수 반환.
+- [x] `GET /articles/review-counts` 추가: review_state별 건수 + `READY_TO_PUBLISH` 건수 반환.
   - 파일: [articles.repository.ts](packages/db/src/repositories/articles.repository.ts)에 `countByReviewState()` 추가(EXCLUDED 포함), controller/service 위임.
-- [ ] 보드 탭 라벨에 건수 뱃지 표시(미검토 N · 선별됨 N · 발행 대상 N · 제외함 N).
-- [ ] 선별됨 단계의 본문 번역 진행률 표시: `body_translated_at IS NULL` 미번역 건수 집계.
+- [x] 보드 탭 라벨에 건수 뱃지 표시(미검토 N · 선별됨 N · 발행 대상 N · 제외함 N).
+- [x] 선별됨 단계의 본문 번역 진행률 표시: `body_translated_at IS NULL` 미번역 건수 집계.
 
 ### WP-3. 일괄 번역 큐 연동 (PROJECT_RULES 4 준수)
 

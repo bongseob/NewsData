@@ -20,7 +20,20 @@ export interface BoardArticle {
   original_body: string | null;
   body_translated_at: string | null;
   updated_at: string | null;
+  created_at?: string | null;
+  press_time?: string | null;
   thumbnail_local_path?: string | null;
+}
+
+export type BoardSortColumn = "updated_at" | "created_at" | "press_time";
+
+export interface ReviewCounts {
+  pending: number;
+  selected: number;
+  ready: number;
+  excluded: number;
+  selectedTranslated: number;
+  selectedUntranslated: number;
 }
 
 interface ArticleBoardProps {
@@ -30,7 +43,23 @@ interface ArticleBoardProps {
   page: number;
   pageSize: number;
   search: string;
+  source: string;
+  sort: BoardSortColumn;
+  order: string;
+  reviewCounts?: ReviewCounts;
 }
+
+const SOURCE_OPTIONS = [
+  { value: "", label: "전체 출처" },
+  { value: "NEWSDATA", label: "NewsData.io" },
+  { value: "NEWSWIRE", label: "뉴스와이어" }
+];
+
+const SORT_OPTIONS: { value: BoardSortColumn; label: string }[] = [
+  { value: "updated_at", label: "수정 시간" },
+  { value: "created_at", label: "수집 시간" },
+  { value: "press_time", label: "발표 시간" }
+];
 
 const TABS: { key: BoardTab; label: string }[] = [
   { key: "pending", label: "미검토" },
@@ -95,7 +124,11 @@ export function ArticleBoard({
   total,
   page,
   pageSize,
-  search
+  search,
+  source,
+  sort,
+  order,
+  reviewCounts
 }: ArticleBoardProps): JSX.Element {
   const router = useRouter();
   const [selected, setSelected] = useState<Set<number>>(new Set());
@@ -124,28 +157,59 @@ export function ArticleBoard({
     );
   };
 
-  const goTab = (key: BoardTab) => {
+  const buildParams = (overrides: Record<string, string | undefined> = {}) => {
+    const merged = {
+      tab,
+      search,
+      source,
+      sort,
+      order,
+      page: String(page),
+      ...overrides
+    };
     const params = new URLSearchParams();
-    params.set("tab", key);
-    if (search) params.set("search", search);
-    router.push(`/articles?${params.toString()}`);
+    if (merged.tab) params.set("tab", merged.tab);
+    if (merged.search) params.set("search", merged.search);
+    if (merged.source) params.set("source", merged.source);
+    if (merged.sort && merged.sort !== "updated_at") params.set("sort", merged.sort);
+    if (merged.order && merged.order !== "desc") params.set("order", merged.order);
+    if (merged.page && merged.page !== "1") params.set("page", merged.page);
+    return params;
+  };
+
+  const goTab = (key: BoardTab) => {
+    router.push(`/articles?${buildParams({ tab: key, page: "1" }).toString()}`);
   };
 
   const submitSearch = (event: React.FormEvent) => {
     event.preventDefault();
-    const params = new URLSearchParams();
-    params.set("tab", tab);
     const value = searchInput.trim();
-    if (value) params.set("search", value);
-    router.push(`/articles?${params.toString()}`);
+    router.push(
+      `/articles?${buildParams({ search: value || undefined, page: "1" }).toString()}`
+    );
+  };
+
+  const changeSource = (value: string) => {
+    router.push(
+      `/articles?${buildParams({ source: value || undefined, page: "1" }).toString()}`
+    );
+  };
+
+  const changeSort = (value: BoardSortColumn) => {
+    router.push(
+      `/articles?${buildParams({ sort: value, page: "1" }).toString()}`
+    );
+  };
+
+  const toggleOrder = () => {
+    const next = order === "asc" ? "desc" : "asc";
+    router.push(
+      `/articles?${buildParams({ order: next }).toString()}`
+    );
   };
 
   const goPage = (target: number) => {
-    const params = new URLSearchParams();
-    params.set("tab", tab);
-    if (search) params.set("search", search);
-    if (target > 1) params.set("page", String(target));
-    router.push(`/articles?${params.toString()}`);
+    router.push(`/articles?${buildParams({ page: String(target) }).toString()}`);
   };
 
   const runAction = async (action: BulkAction) => {
@@ -202,35 +266,98 @@ export function ArticleBoard({
       </header>
 
       <div className="mb-4 flex flex-wrap items-center gap-2">
-        {TABS.map((t) => (
+        {TABS.map((t) => {
+          const count = reviewCounts
+            ? t.key === "pending"
+              ? reviewCounts.pending
+              : t.key === "selected"
+                ? reviewCounts.selected
+                : t.key === "ready"
+                  ? reviewCounts.ready
+                  : reviewCounts.excluded
+            : undefined;
+          return (
+            <button
+              key={t.key}
+              type="button"
+              onClick={() => goTab(t.key)}
+              className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-semibold transition ${
+                t.key === tab
+                  ? "bg-[#1167b1] text-white"
+                  : "border border-line bg-white text-ink-700 hover:bg-slate-50"
+              }`}
+            >
+              {t.label}
+              {count !== undefined && (
+                <span
+                  className={`rounded-full px-1.5 py-0.5 text-xs font-bold ${
+                    t.key === tab
+                      ? "bg-white/20 text-white"
+                      : "bg-slate-100 text-ink-500"
+                  }`}
+                >
+                  {count}
+                </span>
+              )}
+            </button>
+          );
+        })}
+        <div className="ml-auto flex flex-wrap items-center gap-2">
+          <select
+            value={source}
+            onChange={(e) => changeSource(e.target.value)}
+            className="rounded-md border border-line bg-white px-2 py-1.5 text-sm text-ink-700"
+          >
+            {SOURCE_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
+          <select
+            value={sort}
+            onChange={(e) => changeSort(e.target.value as BoardSortColumn)}
+            className="rounded-md border border-line bg-white px-2 py-1.5 text-sm text-ink-700"
+          >
+            {SORT_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
           <button
-            key={t.key}
             type="button"
-            onClick={() => goTab(t.key)}
-            className={`rounded-md px-3 py-1.5 text-sm font-semibold transition ${
-              t.key === tab
-                ? "bg-[#1167b1] text-white"
-                : "border border-line bg-white text-ink-700 hover:bg-slate-50"
-            }`}
+            onClick={toggleOrder}
+            title={order === "asc" ? "오름차순" : "내림차순"}
+            className="rounded-md border border-line bg-white px-2.5 py-1.5 text-sm font-semibold text-ink-700 hover:bg-slate-50"
           >
-            {t.label}
+            {order === "asc" ? "↑" : "↓"}
           </button>
-        ))}
-        <form onSubmit={submitSearch} className="ml-auto flex items-center gap-2">
-          <input
-            value={searchInput}
-            onChange={(e) => setSearchInput(e.target.value)}
-            placeholder="제목/출처 검색"
-            className="rounded-md border border-line px-3 py-1.5 text-sm"
-          />
-          <button
-            type="submit"
-            className="rounded-md border border-line bg-white px-3 py-1.5 text-sm font-semibold text-ink-700 hover:bg-slate-50"
-          >
-            검색
-          </button>
-        </form>
+          <form onSubmit={submitSearch} className="flex items-center gap-2">
+            <input
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
+              placeholder="제목/출처 검색"
+              className="rounded-md border border-line px-3 py-1.5 text-sm"
+            />
+            <button
+              type="submit"
+              className="rounded-md border border-line bg-white px-3 py-1.5 text-sm font-semibold text-ink-700 hover:bg-slate-50"
+            >
+              검색
+            </button>
+          </form>
+        </div>
       </div>
+
+      {tab === "selected" && reviewCounts && reviewCounts.selected > 0 && (
+        <div className="mb-3 flex items-center gap-3 rounded-md bg-blue-50 px-4 py-2 text-xs text-blue-700">
+          <span className="font-semibold">번역 현황</span>
+          <span>본문 번역 완료 {reviewCounts.selectedTranslated}건</span>
+          <span>·</span>
+          <span>미번역 {reviewCounts.selectedUntranslated}건</span>
+        </div>
+      )}
 
       {actions.length > 0 && (
         <div className="mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-line bg-white p-3 shadow-panel">
@@ -271,13 +398,14 @@ export function ArticleBoard({
               <th className="px-4 py-3 font-semibold">국가</th>
               <th className="px-4 py-3 font-semibold">번역</th>
               <th className="px-4 py-3 font-semibold">출처</th>
+              <th className="px-4 py-3 font-semibold">발표 시간</th>
               <th className="px-4 py-3 font-semibold">수정 시간</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-line">
             {items.length === 0 ? (
               <tr>
-                <td colSpan={7} className="px-4 py-10 text-center text-sm text-ink-500">
+                <td colSpan={8} className="px-4 py-10 text-center text-sm text-ink-500">
                   해당 단계의 기사가 없습니다.
                 </td>
               </tr>
@@ -337,6 +465,11 @@ export function ArticleBoard({
                   </td>
                   <td className="whitespace-nowrap px-4 py-3 text-xs text-ink-500">
                     {article.publisher_credit || "N/A"}
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-3 text-xs text-ink-500">
+                    {article.press_time
+                      ? new Date(article.press_time).toLocaleString("ko-KR")
+                      : "-"}
                   </td>
                   <td className="whitespace-nowrap px-4 py-3 text-xs text-ink-500">
                     {article.updated_at

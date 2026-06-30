@@ -7,8 +7,11 @@ import {
 import {
   ArticlesRepository,
   type ArticleRow,
+  type ArticleSortColumn,
+  type ArticleSortOrder,
   type ArticleStatusCountRow,
-  type MysqlPool
+  type MysqlPool,
+  type ReviewStateCountRow
 } from "@newsdata/db";
 import type {
   ArticleReviewState,
@@ -23,6 +26,8 @@ export interface ListArticlesRequest {
   reviewState?: ArticleReviewState;
   source?: ArticleSource;
   search?: string;
+  sort?: ArticleSortColumn;
+  order?: ArticleSortOrder;
   limit?: number;
   offset?: number;
 }
@@ -57,6 +62,10 @@ export class ArticlesService {
 
   countByStatus(): Promise<ArticleStatusCountRow[]> {
     return new ArticlesRepository(this.pool).countByStatus();
+  }
+
+  countByReviewState(): Promise<ReviewStateCountRow[]> {
+    return new ArticlesRepository(this.pool).countByReviewState();
   }
 
   findById(id: number): Promise<ArticleRow | null> {
