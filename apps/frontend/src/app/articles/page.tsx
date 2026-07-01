@@ -98,7 +98,7 @@ async function getReviewCounts(): Promise<ReviewCounts> {
         counts.pending = Number(row.total) || 0;
       } else if (row.review_state === "SELECTED") {
         counts.ready = readyCount;
-        counts.selected = (Number(row.total) || 0) - readyCount;
+        counts.selected = Number(row.total) || 0;
         counts.selectedTranslated = Number(row.translated) || 0;
         counts.selectedUntranslated = Number(row.untranslated) || 0;
       } else if (row.review_state === "EXCLUDED") {

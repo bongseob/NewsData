@@ -22,12 +22,12 @@ export default async function DraftsPage(): Promise<JSX.Element> {
   return (
     <main className="min-h-screen bg-[#f4f6f8] text-ink-950">
       <div className="grid min-h-screen grid-cols-1 lg:grid-cols-[264px_1fr]">
-        <Sidebar active="Draft 검수" />
+        <Sidebar active="Draft 목록" />
         <section className="px-5 py-6 sm:px-8 lg:px-10">
           <header className="mb-7 border-b border-line pb-6">
             <p className="text-sm font-medium text-ink-500">검수 대기</p>
             <h2 className="mt-1 text-2xl font-bold sm:text-3xl">
-              Draft 검수 ({drafts.length}건)
+              Draft 목록 ({drafts.length}건)
             </h2>
           </header>
 

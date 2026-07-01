@@ -63,7 +63,7 @@ export default async function HomePage(): Promise<JSX.Element> {
                 href="/drafts"
                 className="rounded-md border border-line bg-white px-4 py-2 text-sm font-semibold text-ink-700 shadow-sm hover:bg-slate-50"
               >
-                Draft 검수
+                Draft 목록
               </Link>
               <FetchButton />
             </div>

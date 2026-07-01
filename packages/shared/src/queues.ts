@@ -51,3 +51,8 @@ export interface ContentGenerationJobResult {
   target: ContentGenerationTarget;
   suggestions: string[];
 }
+
+export interface PublishJobData {
+  articleId: number;
+  publishJobId: number;
+}

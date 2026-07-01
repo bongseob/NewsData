@@ -534,6 +534,31 @@ export class ArticlesRepository {
     return result.affectedRows;
   }
 
+  async updateStatus(id: number, status: ArticleStatus): Promise<void> {
+    await this.db.execute(
+      `UPDATE articles
+       SET status = :status,
+           updated_at = CURRENT_TIMESTAMP(3)
+       WHERE id = :id`,
+      { id, status }
+    );
+  }
+
+  async updatePublished(id: number, publicUrl: string): Promise<void> {
+    await this.db.execute(
+      `UPDATE articles
+       SET status = :publishedStatus,
+           public_url = :publicUrl,
+           updated_at = CURRENT_TIMESTAMP(3)
+       WHERE id = :id`,
+      {
+        id,
+        publishedStatus: ARTICLE_STATUSES.published,
+        publicUrl
+      }
+    );
+  }
+
   private buildIdInClause(ids: number[]): {
     clause: string;
     params: Record<string, number>;

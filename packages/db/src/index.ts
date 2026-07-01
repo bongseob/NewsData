@@ -3,4 +3,7 @@ export * from "./transaction.js";
 export * from "./repositories/articles.repository.js";
 export * from "./repositories/article-assets.repository.js";
 export * from "./repositories/fetch-jobs.repository.js";
+export * from "./repositories/failure-artifacts.repository.js";
+export * from "./repositories/publish-jobs.repository.js";
+export * from "./repositories/publish-logs.repository.js";
 export * from "./repositories/source-configs.repository.js";

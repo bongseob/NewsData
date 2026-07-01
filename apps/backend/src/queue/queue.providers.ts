@@ -2,9 +2,12 @@ import { Queue, type ConnectionOptions } from "bullmq";
 import { QUEUE_NAMES } from "@newsdata/shared";
 import { getNumberEnv } from "../config/env.js";
 import {
+  CALLBACK_QUEUE,
   CONTENT_QUEUE,
   FETCH_QUEUE,
   IMAGE_QUEUE,
+  PROCESS_QUEUE,
+  PUBLISH_QUEUE,
   TRANSLATE_QUEUE
 } from "./queue.tokens.js";
 
@@ -34,6 +37,14 @@ export const queueProviders = [
     }
   },
   {
+    provide: PROCESS_QUEUE,
+    useFactory(): Queue {
+      return new Queue(QUEUE_NAMES.process, {
+        connection: createRedisConnectionOptions()
+      });
+    }
+  },
+  {
     provide: IMAGE_QUEUE,
     useFactory(): Queue {
       return new Queue(QUEUE_NAMES.image, {
@@ -45,6 +56,22 @@ export const queueProviders = [
     provide: CONTENT_QUEUE,
     useFactory(): Queue {
       return new Queue(QUEUE_NAMES.content, {
+        connection: createRedisConnectionOptions()
+      });
+    }
+  },
+  {
+    provide: PUBLISH_QUEUE,
+    useFactory(): Queue {
+      return new Queue(QUEUE_NAMES.publish, {
+        connection: createRedisConnectionOptions()
+      });
+    }
+  },
+  {
+    provide: CALLBACK_QUEUE,
+    useFactory(): Queue {
+      return new Queue(QUEUE_NAMES.callback, {
         connection: createRedisConnectionOptions()
       });
     }

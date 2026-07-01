@@ -1,19 +1,164 @@
 import { Worker, type ConnectionOptions } from "bullmq";
-import { QUEUE_NAMES } from "@newsdata/shared";
 import { chromium } from "playwright-extra";
+import type { Page } from "playwright";
 import stealth from "puppeteer-extra-plugin-stealth";
 import path from "node:path";
 import fs from "node:fs/promises";
+import {
+  ARTICLE_STATUSES,
+  JOB_STATUSES,
+  PUBLISH_FAILED_STEPS,
+  QUEUE_NAMES,
+  type PublishFailedStep,
+  type PublishJobData
+} from "@newsdata/shared";
+import {
+  ArticlesRepository,
+  createMysqlPool,
+  FailureArtifactsRepository,
+  PublishJobsRepository,
+  PublishLogsRepository,
+  type ArticleRow,
+  type MysqlPool
+} from "@newsdata/db";
 
 chromium.use(stealth());
 
+const pool: MysqlPool = createMysqlPool({
+  host: process.env.MYSQL_HOST || "localhost",
+  port: parseInt(process.env.MYSQL_PORT || "3306", 10),
+  user: process.env.MYSQL_USER || "news",
+  password: process.env.MYSQL_PASSWORD || "",
+  database: process.env.MYSQL_DATABASE || "newsdata"
+});
+
+const articlesRepo = new ArticlesRepository(pool);
+const publishJobsRepo = new PublishJobsRepository(pool);
+const publishLogsRepo = new PublishLogsRepository(pool);
+const failureArtifactsRepo = new FailureArtifactsRepository(pool);
+
+function isDryRun(): boolean {
+  return process.env.PUBLISH_DRY_RUN !== "0";
+}
+
+function getArticleTitle(article: ArticleRow): string {
+  return article.translated_title || article.title;
+}
+
+function getArticleSubtitle(article: ArticleRow): string | null {
+  return article.translated_subtitle || article.subtitle;
+}
+
+function getArticleBody(article: ArticleRow): string | null {
+  return article.translated_body || article.original_body || article.body;
+}
+
+function formatError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function getLoginUrl(): string {
+  return process.env.DMAKER_LOGIN_URL || "https://www.d-maker.kr/admin/adminLoginForm.html";
+}
+
+function getWriteUrl(): string {
+  return process.env.DMAKER_ARTICLE_WRITE_URL || "https://www.d-maker.kr/news/adminArticleWriteForm.html?mode=input";
+}
+
+function getPublicArticleUrl(idxno: string): string {
+  const pattern = process.env.DMAKER_PUBLIC_ARTICLE_URL_PATTERN;
+  if (pattern?.includes("{idxno}")) {
+    return pattern.replace("{idxno}", idxno);
+  }
+
+  return `https://www.d-maker.kr/news/articleView.html?idxno=${idxno}`;
+}
+
+async function clickFirstAvailable(
+  page: Page,
+  selectors: string[]
+): Promise<string> {
+  for (const selector of selectors.filter(Boolean)) {
+    const locator = page.locator(selector).first();
+    try {
+      if ((await locator.count()) === 0) continue;
+      await locator.click({ timeout: 3000 });
+      return selector;
+    } catch {
+      continue;
+    }
+  }
+
+  throw new Error(`Submit control not found. Tried selectors: ${selectors.join(", ")}`);
+}
+
+function extractIdxnoFromText(value: string): string | null {
+  const urlMatch = value.match(/[?&]idxno=(\d+)/i);
+  if (urlMatch?.[1]) return urlMatch[1];
+
+  const textMatch = value.match(/idxno[^0-9]{0,10}(\d+)/i);
+  return textMatch?.[1] ?? null;
+}
+
+function titleMatches(pageText: string, title: string): boolean {
+  const normalize = (value: string) => value.replace(/\s+/g, " ").trim();
+  const normalizedText = normalize(pageText);
+  const normalizedTitle = normalize(title);
+  if (normalizedText.includes(normalizedTitle)) return true;
+
+  return normalizedTitle.length > 20
+    ? normalizedText.includes(normalizedTitle.slice(0, 20))
+    : false;
+}
+
+async function resolveThumbnailPath(localPath: string): Promise<string> {
+  const filename = path.basename(localPath);
+  const candidates = [
+    path.resolve(process.cwd(), "uploads", "thumbnails", filename),
+    path.resolve(process.cwd(), "apps", "backend", "uploads", "thumbnails", filename)
+  ];
+
+  for (const candidate of candidates) {
+    try {
+      await fs.access(candidate);
+      return candidate;
+    } catch {
+      continue;
+    }
+  }
+
+  throw new Error(`Thumbnail file not found: ${filename}`);
+}
+
 export function registerPublishWorker(connection: ConnectionOptions): Worker {
-  return new Worker(
+  return new Worker<PublishJobData>(
     QUEUE_NAMES.publish,
     async (job) => {
-      console.log(`[Publish Worker] job accepted: ${job.id}`, job.data);
-      const { articleId, title, subTitle, content, thumbnailPath } = job.data || {};
-      
+      const { articleId, publishJobId } = job.data || {};
+      console.log(`[Publish] Job ${job.id} started articleId=${articleId} publishJobId=${publishJobId}`);
+
+      if (!articleId || !publishJobId) {
+        throw new Error("Publish job data must include articleId and publishJobId.");
+      }
+
+      const article = await articlesRepo.findById(articleId);
+      if (!article) {
+        throw new Error(`Article not found: ${articleId}`);
+      }
+
+      await publishJobsRepo.updateStatus(publishJobId, JOB_STATUSES.running);
+
+      if (isDryRun()) {
+        await publishLogsRepo.create({
+          publishJobId,
+          articleId,
+          status: "DRY_RUN_SUCCEEDED"
+        });
+        await publishJobsRepo.updateStatus(publishJobId, JOB_STATUSES.succeeded);
+        console.log(`[Publish] Job ${job.id} dry-run done articleId=${articleId}`);
+        return { articleId, publishJobId, dryRun: true };
+      }
+
       const adminId = process.env.DMAKER_ADMIN_ID;
       const adminPw = process.env.DMAKER_ADMIN_PASSWORD;
 
@@ -21,90 +166,153 @@ export function registerPublishWorker(connection: ConnectionOptions): Worker {
         throw new Error("Missing admin credentials in environment variables.");
       }
 
-      console.log(`[Publish Worker] Launching browser for article: ${articleId}`);
       const browser = await chromium.launch({ headless: true });
       const context = await browser.newContext();
       const page = await context.newPage();
+      let failedStep: PublishFailedStep = PUBLISH_FAILED_STEPS.login;
 
       try {
-        // 1. Login
-        console.log(`[Publish Worker] Navigating to login page...`);
-        await page.goto("https://www.d-maker.kr/admin/adminLoginForm.html");
+        await articlesRepo.updateStatus(articleId, ARTICLE_STATUSES.publishing);
+
+        failedStep = PUBLISH_FAILED_STEPS.login;
+        await page.goto(getLoginUrl());
         await page.fill("#user_id", adminId);
         await page.fill("#user_pw", adminPw);
-        
-        // Wait for navigation after clicking login
         await Promise.all([
-          page.waitForNavigation({ waitUntil: 'networkidle' }).catch(() => {}),
-          page.click('button[type="submit"], input[type="submit"], .login-btn').catch(() => page.keyboard.press('Enter'))
+          page.waitForNavigation({ waitUntil: "networkidle" }).catch(() => {}),
+          page.click('button[type="submit"], input[type="submit"], .login-btn').catch(() => page.keyboard.press("Enter"))
         ]);
-        console.log(`[Publish Worker] Login attempted.`);
 
-        // 2. Go to Write Form
-        console.log(`[Publish Worker] Navigating to write form...`);
-        await page.goto("https://www.d-maker.kr/news/adminArticleWriteForm.html?mode=input", { waitUntil: 'networkidle' });
+        failedStep = PUBLISH_FAILED_STEPS.openForm;
+        await page.goto(getWriteUrl(), {
+          waitUntil: "networkidle"
+        });
 
-        // 3. Fill Article Metadata
-        console.log(`[Publish Worker] Filling article data...`);
-        // 카테고리: #sectionCode ('S1N1' 선택)
-        await page.selectOption("#sectionCode", "S1N1").catch(e => console.warn('sectionCode select failed', e));
-        
-        // 제목, 부제목
-        if (title) await page.fill("#title", title).catch(e => console.warn('title fill failed', e));
-        if (subTitle) await page.fill("#subTitle", subTitle).catch(e => console.warn('subTitle fill failed', e));
+        failedStep = PUBLISH_FAILED_STEPS.fillForm;
+        await page.selectOption("#sectionCode", "S1N1").catch((error) => {
+          console.warn("[Publish] sectionCode select failed", error);
+        });
 
-        // 4. Image Upload (Thumbnail)
-        // 지시사항: uploads/thumbnails/ 에 저장된 이미지를 파일 업로드 기능으로 삽입
-        if (thumbnailPath) {
-          try {
-            const absoluteThumbPath = path.resolve(process.cwd(), thumbnailPath);
-            await fs.access(absoluteThumbPath);
-            
-            // 방어적 인풋 탐색 (대표적인 파일 첨부 input들)
-            const fileInputSelector = 'input[type="file"]';
-            const fileInput = await page.$(fileInputSelector);
-            if (fileInput) {
-               await page.setInputFiles(fileInputSelector, absoluteThumbPath);
-               console.log(`[Publish Worker] Thumbnail uploaded: ${absoluteThumbPath}`);
-            } else {
-               console.warn(`[Publish Worker] Could not find file input for thumbnail.`);
-            }
-          } catch (e) {
-            console.warn(`[Publish Worker] Thumbnail file not found or upload failed: ${thumbnailPath}`, e);
+        await page.fill("#title", getArticleTitle(article));
+        const subtitle = getArticleSubtitle(article);
+        if (subtitle) {
+          await page.fill("#subTitle", subtitle).catch((error) => {
+            console.warn("[Publish] subTitle fill failed", error);
+          });
+        }
+
+        const body = getArticleBody(article);
+        if (!body) {
+          throw new Error("Article body is empty.");
+        }
+
+        const editorIframe = await page.$('iframe[title*="editor"], iframe[id*="editor"]');
+        if (editorIframe) {
+          const frame = await editorIframe.contentFrame();
+          if (frame) {
+            await frame.evaluate((htmlContent: string) => {
+              document.body.innerHTML = htmlContent;
+            }, body);
+          }
+        } else {
+          const textarea = await page.$('textarea[name="content"], textarea#content');
+          if (textarea) await textarea.fill(body);
+        }
+
+        if (article.thumbnail_local_path) {
+          failedStep = PUBLISH_FAILED_STEPS.uploadImage;
+          const absoluteThumbPath = await resolveThumbnailPath(article.thumbnail_local_path);
+          const fileInput = await page.$('input[type="file"]');
+          if (fileInput) {
+            await page.setInputFiles('input[type="file"]', absoluteThumbPath);
           }
         }
 
-        // 5. Content Editor (방어적 에디터 내용 주입)
-        if (content) {
-          try {
-             const editorIframe = await page.$('iframe[title*="editor"], iframe[id*="editor"]');
-             if (editorIframe) {
-                const frame = await editorIframe.contentFrame();
-                if (frame) {
-                  await frame.evaluate((htmlContent: string) => {
-                    document.body.innerHTML = htmlContent;
-                  }, content);
-                }
-             } else {
-                const textarea = await page.$('textarea[name="content"], textarea#content');
-                if (textarea) await textarea.fill(content);
-             }
-          } catch (e) {
-             console.warn(`[Publish Worker] Editor content fill failed.`, e);
-          }
+        failedStep = PUBLISH_FAILED_STEPS.submit;
+        page.on("dialog", async (dialog) => {
+          await dialog.accept().catch(() => undefined);
+        });
+        const submitSelector = await clickFirstAvailable(page, [
+          process.env.DMAKER_SUBMIT_SELECTOR || "",
+          "#btnSubmit",
+          "#btn_submit",
+          ".btn_submit",
+          'button[type="submit"]',
+          'input[type="submit"]',
+          'button:has-text("등록")',
+          'a:has-text("등록")',
+          'input[value*="등록"]',
+          'button:has-text("저장")',
+          'a:has-text("저장")',
+          'input[value*="저장"]'
+        ]);
+        console.log(`[Publish] Submit clicked with selector: ${submitSelector}`);
+        await page.waitForLoadState("networkidle", { timeout: 15000 }).catch(() => undefined);
+
+        failedStep = PUBLISH_FAILED_STEPS.verify;
+        const content = await page.content();
+        const idxno = extractIdxnoFromText(page.url()) || extractIdxnoFromText(content);
+        if (!idxno) {
+          throw new Error("Published article idxno could not be extracted after submit.");
         }
 
-        console.log(`[Publish Worker] Article filling complete for: ${articleId}`);
-        
-        // 주의: 등록 버튼 클릭은 프로젝트 안전을 위해 스켈레톤 상태로 유지(주석 처리)하거나, 실제 연동 시 활성화
-        // await page.click('#btnSubmit, button.submit, button:has-text("등록")');
+        const publicUrl = getPublicArticleUrl(idxno);
+        await page.goto(publicUrl, { waitUntil: "networkidle" });
+        const publicText = await page.locator("body").innerText({ timeout: 10000 });
+        const title = getArticleTitle(article);
+        if (!titleMatches(publicText, title)) {
+          throw new Error("Public article page did not include the submitted title.");
+        }
 
+        await publishLogsRepo.create({
+          publishJobId,
+          articleId,
+          status: JOB_STATUSES.succeeded,
+          idxno,
+          publicUrl,
+          currentUrl: page.url()
+        });
+        await publishJobsRepo.updateStatus(publishJobId, JOB_STATUSES.succeeded);
+        await articlesRepo.updatePublished(articleId, publicUrl);
+        console.log(`[Publish] Job ${job.id} succeeded articleId=${articleId} publicUrl=${publicUrl}`);
+        return { articleId, publishJobId, idxno, publicUrl };
       } catch (error) {
-        console.error(`[Publish Worker] Error during publishing article ${articleId}:`, error);
+        const errorMessage = formatError(error);
+        const currentUrl = page.url();
+        const artifactDir = path.resolve(
+          process.env.PLAYWRIGHT_ARTIFACT_DIR || "uploads/playwright-artifacts"
+        );
+        await fs.mkdir(artifactDir, { recursive: true });
+        const baseName = `publish-${publishJobId}-${Date.now()}`;
+        const screenshotPath = path.join(artifactDir, `${baseName}.png`);
+        const htmlSnapshotPath = path.join(artifactDir, `${baseName}.html`);
+
+        await page.screenshot({ path: screenshotPath, fullPage: true }).catch(() => undefined);
+        await fs.writeFile(htmlSnapshotPath, await page.content(), "utf8").catch(() => undefined);
+
+        await publishLogsRepo.create({
+          publishJobId,
+          articleId,
+          status: JOB_STATUSES.failed,
+          failedStep,
+          currentUrl,
+          errorMessage
+        });
+        await failureArtifactsRepo.create({
+          articleId,
+          publishJobId,
+          failedStep,
+          screenshotPath,
+          htmlSnapshotPath,
+          currentUrl,
+          errorMessage
+        });
+        await publishJobsRepo.updateStatus(publishJobId, JOB_STATUSES.failed, errorMessage);
+        await articlesRepo.updateStatus(articleId, ARTICLE_STATUSES.failed);
+        console.error(`[Publish] Job ${job.id} FAILED articleId=${articleId}: ${errorMessage}`);
         throw error;
       } finally {
         await browser.close();
-        console.log(`[Publish Worker] Browser closed.`);
       }
     },
     { connection }
