@@ -33,6 +33,7 @@ function buildNewsDataUrl(
   query: NewsDataFetchQuery,
   nextPage?: string
 ): string {
+  const endpoint = query.from_date || query.to_date ? "archive" : "news";
   const params = new URLSearchParams();
   params.set("apikey", apiKey);
 
@@ -54,7 +55,7 @@ function buildNewsDataUrl(
     if (query.size) params.set("size", String(query.size));
   }
 
-  return `https://newsdata.io/api/1/news?${params.toString()}`;
+  return `https://newsdata.io/api/1/${endpoint}?${params.toString()}`;
 }
 
 function redactApiKey(url: string): string {
@@ -63,6 +64,23 @@ function redactApiKey(url: string): string {
     parsed.searchParams.set("apikey", "[redacted]");
   }
   return parsed.toString();
+}
+
+function formatNewsDataRequestError(error: unknown): string {
+  if (!axios.isAxiosError(error)) {
+    return error instanceof Error ? error.message : "Unknown NewsData.io request error";
+  }
+
+  const status = error.response?.status;
+  const data = error.response?.data;
+  const body =
+    typeof data === "string"
+      ? data
+      : data
+        ? JSON.stringify(data)
+        : "";
+  const statusText = status ? `HTTP ${status}` : "request failed";
+  return body ? `NewsData.io ${statusText}: ${body}` : `NewsData.io ${statusText}: ${error.message}`;
 }
 
 export function registerFetchWorker(connection: ConnectionOptions): Worker {
@@ -109,6 +127,8 @@ export function registerFetchWorker(connection: ConnectionOptions): Worker {
         const response = await axios.get<NewsDataResponse>(url, {
           timeout: 15000,
           validateStatus: (status) => status >= 200 && status < 300
+        }).catch((error: unknown) => {
+          throw new Error(formatNewsDataRequestError(error));
         });
 
         const data = response.data;

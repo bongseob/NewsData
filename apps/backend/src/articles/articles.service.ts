@@ -4,6 +4,7 @@ import {
   Injectable,
   NotFoundException
 } from "@nestjs/common";
+import { Queue } from "bullmq";
 import {
   ArticlesRepository,
   type ArticleRow,
@@ -16,10 +17,27 @@ import {
 import type {
   ArticleReviewState,
   ArticleSource,
-  ArticleStatus
+  ArticleStatus,
+  ContentGenerationJobData,
+  ContentGenerationJobResult,
+  ContentGenerationTarget,
+  ImageGenerationJobData,
+  TranslateJobData
 } from "@newsdata/shared";
-import { ARTICLE_REVIEW_STATES } from "@newsdata/shared";
+import {
+  ARTICLE_REVIEW_STATES,
+  appendTranslationAttribution,
+  CONTENT_GENERATION_TARGETS,
+  IMAGE_JOB_TYPES,
+  QUEUE_NAMES,
+  TRANSLATION_TARGETS
+} from "@newsdata/shared";
 import { MYSQL_POOL } from "../database/database.tokens.js";
+import {
+  CONTENT_QUEUE,
+  IMAGE_QUEUE,
+  TRANSLATE_QUEUE
+} from "../queue/queue.tokens.js";
 
 export interface ListArticlesRequest {
   status?: ArticleStatus;
@@ -34,14 +52,51 @@ export interface ListArticlesRequest {
 
 export interface TranslateBodyResult {
   articleId: number;
-  translatedBody: string;
-  bodyTranslatedAt: Date;
+  queue: string;
+  queueJobId: string | undefined;
+  status: "QUEUED";
+}
+
+export interface TranslateBodiesResult {
+  queue: string;
+  queued: Array<{
+    articleId: number;
+    queueJobId: string | undefined;
+  }>;
+  skipped: Array<{
+    articleId: number;
+    reason: string;
+  }>;
+}
+
+export interface GenerateImageResult {
+  articleId: number;
+  queue: string;
+  queueJobId: string | undefined;
+  status: "QUEUED";
+}
+
+export interface GenerateContentResult {
+  articleId: number;
+  target: ContentGenerationTarget;
+  queue: string;
+  queueJobId: string | undefined;
+  status: "QUEUED";
+}
+
+export interface ContentGenerationStatus {
+  articleId: number;
+  target: ContentGenerationTarget;
+  status: string;
+  suggestions: string[] | null;
+  failedReason: string | null;
 }
 
 export interface SaveTranslationsRequest {
   translatedTitle?: string | null;
   translatedSubtitle?: string | null;
   translatedBody?: string | null;
+  keywords?: string[] | string | null;
 }
 
 const VALID_REVIEW_STATES: ReadonlySet<string> = new Set(
@@ -50,7 +105,18 @@ const VALID_REVIEW_STATES: ReadonlySet<string> = new Set(
 
 @Injectable()
 export class ArticlesService {
-  constructor(@Inject(MYSQL_POOL) private readonly pool: MysqlPool) {}
+  constructor(
+    @Inject(MYSQL_POOL) private readonly pool: MysqlPool,
+    @Inject(TRANSLATE_QUEUE)
+    private readonly translateQueue: Queue<TranslateJobData>,
+    @Inject(IMAGE_QUEUE)
+    private readonly imageQueue: Queue<ImageGenerationJobData>,
+    @Inject(CONTENT_QUEUE)
+    private readonly contentQueue: Queue<
+      ContentGenerationJobData,
+      ContentGenerationJobResult
+    >
+  ) {}
 
   list(input: ListArticlesRequest): Promise<ArticleRow[]> {
     return new ArticlesRepository(this.pool).list(input);
@@ -68,8 +134,16 @@ export class ArticlesService {
     return new ArticlesRepository(this.pool).countByReviewState();
   }
 
-  findById(id: number): Promise<ArticleRow | null> {
-    return new ArticlesRepository(this.pool).findById(id);
+  async findById(id: number): Promise<ArticleRow | null> {
+    const article = await new ArticlesRepository(this.pool).findById(id);
+    if (article?.translated_body) {
+      article.translated_body = appendTranslationAttribution(
+        article.translated_body,
+        article.source_url
+      );
+    }
+
+    return article;
   }
 
   async translateBody(id: number): Promise<TranslateBodyResult> {
@@ -84,14 +158,169 @@ export class ArticlesService {
       throw new BadRequestException("번역할 원문 본문이 없습니다.");
     }
 
-    const translatedBody = await this.translateToKorean(sourceBody);
-    const translatedAt = new Date();
-    await repository.updateBodyTranslation(id, translatedBody, translatedAt);
+    const job = await this.enqueueBodyTranslation(id);
 
     return {
       articleId: id,
-      translatedBody,
-      bodyTranslatedAt: translatedAt
+      queue: QUEUE_NAMES.translate,
+      queueJobId: job.id,
+      status: "QUEUED"
+    };
+  }
+
+  async translateBodies(ids: unknown): Promise<TranslateBodiesResult> {
+    const normalizedIds = this.normalizeIds(ids);
+    const repository = new ArticlesRepository(this.pool);
+    const articles = await repository.findByIds(normalizedIds);
+    const articleById = new Map(articles.map((article) => [article.id, article]));
+
+    const queued: TranslateBodiesResult["queued"] = [];
+    const skipped: TranslateBodiesResult["skipped"] = [];
+
+    for (const id of normalizedIds) {
+      const article = articleById.get(id);
+      if (!article) {
+        skipped.push({ articleId: id, reason: "NOT_FOUND" });
+        continue;
+      }
+
+      const sourceBody = article.original_body || article.body;
+      if (!sourceBody) {
+        skipped.push({ articleId: id, reason: "NO_BODY" });
+        continue;
+      }
+
+      const job = await this.enqueueBodyTranslation(id);
+      queued.push({ articleId: id, queueJobId: job.id });
+    }
+
+    return {
+      queue: QUEUE_NAMES.translate,
+      queued,
+      skipped
+    };
+  }
+
+  async generateCopyrightSafeImage(id: number): Promise<GenerateImageResult> {
+    const repository = new ArticlesRepository(this.pool);
+    const article = await repository.findById(id);
+    if (!article) {
+      throw new NotFoundException("Article not found.");
+    }
+
+    const sourceText = [
+      article.translated_title || article.title,
+      article.translated_subtitle || article.subtitle,
+      article.translated_body || article.original_body || article.body
+    ]
+      .filter(Boolean)
+      .join("\n\n");
+
+    if (!sourceText.trim()) {
+      throw new BadRequestException("이미지 생성에 사용할 기사 내용이 없습니다.");
+    }
+
+    const job = await this.imageQueue.add(
+      "generate-thumbnail",
+      {
+        articleId: id,
+        type: IMAGE_JOB_TYPES.generateThumbnail
+      },
+      {
+        attempts: 2,
+        backoff: {
+          type: "exponential",
+          delay: 30000
+        }
+      }
+    );
+
+    return {
+      articleId: id,
+      queue: QUEUE_NAMES.image,
+      queueJobId: job.id,
+      status: "QUEUED"
+    };
+  }
+
+  async generateContent(
+    id: number,
+    target: unknown
+  ): Promise<GenerateContentResult> {
+    const normalizedTarget = this.normalizeContentTarget(target);
+    const repository = new ArticlesRepository(this.pool);
+    const article = await repository.findById(id);
+    if (!article) {
+      throw new NotFoundException("Article not found.");
+    }
+
+    if (
+      normalizedTarget === CONTENT_GENERATION_TARGETS.subtitle &&
+      article.translated_subtitle
+    ) {
+      throw new BadRequestException("이미 번역 부제목이 있습니다.");
+    }
+
+    if (
+      normalizedTarget === CONTENT_GENERATION_TARGETS.keywords &&
+      this.normalizeKeywords(article.keywords).length > 0
+    ) {
+      throw new BadRequestException("이미 키워드가 있습니다.");
+    }
+
+    const sourceText = [
+      article.translated_title || article.title,
+      article.translated_body || article.original_body || article.body
+    ]
+      .filter(Boolean)
+      .join("\n\n");
+
+    if (!sourceText.trim()) {
+      throw new BadRequestException("생성에 사용할 기사 내용이 없습니다.");
+    }
+
+    const job = await this.contentQueue.add(
+      `generate-${normalizedTarget.toLowerCase()}`,
+      {
+        articleId: id,
+        target: normalizedTarget
+      },
+      {
+        attempts: 2,
+        backoff: {
+          type: "exponential",
+          delay: 30000
+        }
+      }
+    );
+
+    return {
+      articleId: id,
+      target: normalizedTarget,
+      queue: QUEUE_NAMES.content,
+      queueJobId: job.id,
+      status: "QUEUED"
+    };
+  }
+
+  async getContentGenerationStatus(
+    id: number,
+    jobId: string
+  ): Promise<ContentGenerationStatus> {
+    const job = await this.contentQueue.getJob(jobId);
+    if (!job || job.data.articleId !== id) {
+      throw new NotFoundException("Content generation job not found.");
+    }
+
+    const state = await job.getState();
+    const returnValue = job.returnvalue as ContentGenerationJobResult | null;
+
+    return {
+      articleId: id,
+      target: job.data.target,
+      status: state,
+      suggestions: returnValue?.suggestions ?? null,
+      failedReason: job.failedReason || null
     };
   }
 
@@ -113,6 +342,49 @@ export class ArticlesService {
     }
 
     return normalized;
+  }
+
+  private normalizeContentTarget(target: unknown): ContentGenerationTarget {
+    if (
+      target === CONTENT_GENERATION_TARGETS.subtitle ||
+      target === "subtitle"
+    ) {
+      return CONTENT_GENERATION_TARGETS.subtitle;
+    }
+    if (
+      target === CONTENT_GENERATION_TARGETS.keywords ||
+      target === "keywords"
+    ) {
+      return CONTENT_GENERATION_TARGETS.keywords;
+    }
+
+    throw new BadRequestException("지원하지 않는 생성 대상입니다.");
+  }
+
+  private normalizeKeywords(value: unknown): string[] {
+    if (Array.isArray(value)) {
+      return value
+        .map((keyword) => String(keyword).trim())
+        .filter((keyword) => keyword.length > 0)
+        .slice(0, 20);
+    }
+
+    if (typeof value === "string") {
+      try {
+        const parsed = JSON.parse(value) as unknown;
+        if (Array.isArray(parsed)) {
+          return this.normalizeKeywords(parsed);
+        }
+      } catch {
+        return value
+          .split(",")
+          .map((keyword) => keyword.trim())
+          .filter((keyword) => keyword.length > 0)
+          .slice(0, 20);
+      }
+    }
+
+    return [];
   }
 
   async setReviewState(
@@ -166,11 +438,20 @@ export class ArticlesService {
       const trimmed = value.trim();
       return trimmed.length > 0 ? trimmed : null;
     };
+    const translatedBody = trim(input.translatedBody);
+    const keywords =
+      input.keywords === undefined
+        ? undefined
+        : this.normalizeKeywords(input.keywords);
 
     await repository.updateTranslations(id, {
       translatedTitle: trim(input.translatedTitle),
       translatedSubtitle: trim(input.translatedSubtitle),
-      translatedBody: trim(input.translatedBody)
+      translatedBody:
+        typeof translatedBody === "string"
+          ? appendTranslationAttribution(translatedBody, article.source_url)
+          : translatedBody,
+      keywords
     });
 
     const updated = await repository.findById(id);
@@ -181,42 +462,20 @@ export class ArticlesService {
     return updated;
   }
 
-  private async translateToKorean(text: string): Promise<string> {
-    const deeplApiKey = process.env.DEEPL_API_KEY;
-    if (!deeplApiKey) {
-      throw new BadRequestException("DEEPL_API_KEY가 설정되어 있지 않습니다.");
-    }
-
-    const isPro = !deeplApiKey.endsWith(":fx");
-    const apiUrl = isPro
-      ? "https://api.deepl.com/v2/translate"
-      : "https://api-free.deepl.com/v2/translate";
-
-    const response = await fetch(apiUrl, {
-      method: "POST",
-      headers: {
-        Authorization: `DeepL-Auth-Key ${deeplApiKey}`,
-        "Content-Type": "application/json"
+  private enqueueBodyTranslation(articleId: number) {
+    return this.translateQueue.add(
+      "translate-body",
+      {
+        articleId,
+        target: TRANSLATION_TARGETS.body
       },
-      body: JSON.stringify({
-        text: [text],
-        target_lang: "KO"
-      })
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new BadRequestException(`본문 번역 실패: ${errorText}`);
-    }
-
-    const data = (await response.json()) as {
-      translations?: Array<{ text?: string }>;
-    };
-    const translated = data.translations?.[0]?.text;
-    if (!translated) {
-      throw new BadRequestException("본문 번역 응답에 번역문이 없습니다.");
-    }
-
-    return translated;
+      {
+        attempts: 3,
+        backoff: {
+          type: "exponential",
+          delay: 30000
+        }
+      }
+    );
   }
 }

@@ -26,6 +26,7 @@ export interface ArticleRow extends RowDataPacket {
   translated_body: string | null;
   title_translated_at: Date | null;
   body_translated_at: Date | null;
+  keywords: string[] | string | null;
   publisher_credit: string | null;
   country: string | null;
   source_url: string | null;
@@ -35,6 +36,8 @@ export interface ArticleRow extends RowDataPacket {
   created_at: Date;
   updated_at: Date;
   thumbnail_local_path?: string | null;
+  thumbnail_source_url?: string | null;
+  thumbnail_is_generated?: number;
 }
 
 export interface ArticleStatusCountRow extends RowDataPacket {
@@ -78,6 +81,7 @@ export interface UpdateTranslationsInput {
   translatedTitle?: string | null;
   translatedSubtitle?: string | null;
   translatedBody?: string | null;
+  keywords?: string[] | null;
 }
 
 export interface UpsertArticleInput {
@@ -95,6 +99,7 @@ export interface UpsertArticleInput {
   translatedBody?: string | null;
   titleTranslatedAt?: Date | null;
   bodyTranslatedAt?: Date | null;
+  keywords?: string[] | null;
   publisherCredit?: string | null;
   country?: string | null;
   sourceUrl?: string | null;
@@ -107,7 +112,34 @@ export class ArticlesRepository {
 
   async findById(id: number): Promise<ArticleRow | null> {
     const [rows] = await this.db.execute<ArticleRow[]>(
-      "SELECT * FROM articles WHERE id = :id LIMIT 1",
+      `SELECT a.*,
+              (
+                SELECT aa.local_path
+                FROM article_assets aa
+                WHERE aa.article_id = a.id
+                  AND aa.asset_type = 'THUMBNAIL'
+                ORDER BY aa.id DESC
+                LIMIT 1
+              ) AS thumbnail_local_path,
+              (
+                SELECT aa.source_url
+                FROM article_assets aa
+                WHERE aa.article_id = a.id
+                  AND aa.asset_type = 'THUMBNAIL'
+                ORDER BY aa.id DESC
+                LIMIT 1
+              ) AS thumbnail_source_url,
+              (
+                SELECT CASE WHEN aa.source_url LIKE 'generated:%' THEN 1 ELSE 0 END
+                FROM article_assets aa
+                WHERE aa.article_id = a.id
+                  AND aa.asset_type = 'THUMBNAIL'
+                ORDER BY aa.id DESC
+                LIMIT 1
+              ) AS thumbnail_is_generated
+       FROM articles a
+       WHERE a.id = :id
+       LIMIT 1`,
       { id }
     );
 
@@ -124,6 +156,20 @@ export class ArticlesRepository {
     );
 
     return rows[0] ?? null;
+  }
+
+  async findByIds(ids: number[]): Promise<ArticleRow[]> {
+    const { clause, params } = this.buildIdInClause(ids);
+    if (!clause) {
+      return [];
+    }
+
+    const [rows] = await this.db.execute<ArticleRow[]>(
+      `SELECT * FROM articles WHERE id IN (${clause})`,
+      params
+    );
+
+    return rows;
   }
 
   async upsertCollectedArticle(input: UpsertArticleInput): Promise<number> {
@@ -143,6 +189,7 @@ export class ArticlesRepository {
         translated_body,
         title_translated_at,
         body_translated_at,
+        keywords,
         publisher_credit,
         country,
         source_url,
@@ -163,6 +210,7 @@ export class ArticlesRepository {
         :translatedBody,
         :titleTranslatedAt,
         :bodyTranslatedAt,
+        :keywords,
         :publisherCredit,
         :country,
         :sourceUrl,
@@ -182,6 +230,7 @@ export class ArticlesRepository {
         translated_body = VALUES(translated_body),
         title_translated_at = VALUES(title_translated_at),
         body_translated_at = VALUES(body_translated_at),
+        keywords = VALUES(keywords),
         publisher_credit = VALUES(publisher_credit),
         country = VALUES(country),
         source_url = VALUES(source_url),
@@ -203,6 +252,7 @@ export class ArticlesRepository {
         translatedBody: input.translatedBody ?? null,
         titleTranslatedAt: input.titleTranslatedAt ?? null,
         bodyTranslatedAt: input.bodyTranslatedAt ?? null,
+        keywords: input.keywords ? JSON.stringify(input.keywords) : null,
         publisherCredit: input.publisherCredit ?? null,
         country: input.country ?? null,
         sourceUrl: input.sourceUrl ?? null,
@@ -264,9 +314,32 @@ export class ArticlesRepository {
     const order = input.order === "asc" ? "ASC" : "DESC";
 
     const [rows] = await this.db.execute<ArticleRow[]>(
-      `SELECT a.*, aa.local_path as thumbnail_local_path
+      `SELECT a.*,
+              (
+                SELECT aa.local_path
+                FROM article_assets aa
+                WHERE aa.article_id = a.id
+                  AND aa.asset_type = 'THUMBNAIL'
+                ORDER BY aa.id DESC
+                LIMIT 1
+              ) AS thumbnail_local_path,
+              (
+                SELECT aa.source_url
+                FROM article_assets aa
+                WHERE aa.article_id = a.id
+                  AND aa.asset_type = 'THUMBNAIL'
+                ORDER BY aa.id DESC
+                LIMIT 1
+              ) AS thumbnail_source_url,
+              (
+                SELECT CASE WHEN aa.source_url LIKE 'generated:%' THEN 1 ELSE 0 END
+                FROM article_assets aa
+                WHERE aa.article_id = a.id
+                  AND aa.asset_type = 'THUMBNAIL'
+                ORDER BY aa.id DESC
+                LIMIT 1
+              ) AS thumbnail_is_generated
        FROM articles a
-       LEFT JOIN article_assets aa ON a.id = aa.article_id AND aa.asset_type = 'THUMBNAIL'
        ${whereSql}
        ORDER BY ${sortCol} ${order}, a.id DESC
        LIMIT ${limit} OFFSET ${offset}`,
@@ -361,6 +434,10 @@ export class ArticlesRepository {
       sets.push("translated_body = :translatedBody");
       sets.push("body_translated_at = CURRENT_TIMESTAMP(3)");
       params.translatedBody = input.translatedBody;
+    }
+    if (input.keywords !== undefined) {
+      sets.push("keywords = :keywords");
+      params.keywords = input.keywords ? JSON.stringify(input.keywords) : null;
     }
 
     if (sets.length === 0) {

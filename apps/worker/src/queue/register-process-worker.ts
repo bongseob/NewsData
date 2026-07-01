@@ -15,6 +15,7 @@ import { join, resolve } from "node:path";
 import { mkdir, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { crawlArticle } from "../crawl/crawl-article.js";
+import { translateToKorean } from "../translate/deepl.js";
 
 // ────────────────────────────────────────────────────────────────────
 // Helpers
@@ -31,46 +32,6 @@ function filterPaidPlanPlaceholder(value: string | null): string | null {
   return PAID_PLAN_MARKERS.some((m) => value.toUpperCase().includes(m))
     ? null
     : value;
-}
-
-async function translateToKorean(
-  text: string | null
-): Promise<string | null> {
-  if (!text) return null;
-
-  const deeplApiKey = process.env.DEEPL_API_KEY;
-  if (!deeplApiKey) {
-    console.warn(
-      "[Translate] DEEPL_API_KEY is not set. Saving original text."
-    );
-    return text;
-  }
-
-  try {
-    const isPro = !deeplApiKey.endsWith(":fx");
-    const apiUrl = isPro
-      ? "https://api.deepl.com/v2/translate"
-      : "https://api-free.deepl.com/v2/translate";
-
-    const response = await axios.post(
-      apiUrl,
-      { text: [text], target_lang: "KO" },
-      {
-        headers: {
-          Authorization: `DeepL-Auth-Key ${deeplApiKey}`,
-          "Content-Type": "application/json"
-        }
-      }
-    );
-
-    return response.data.translations[0].text;
-  } catch (error) {
-    console.error(
-      "[Translate] Translation failed, returning original:",
-      error instanceof Error ? error.message : "Unknown error"
-    );
-    return text;
-  }
 }
 
 // ────────────────────────────────────────────────────────────────────
@@ -127,6 +88,12 @@ export function registerProcessWorker(
         ? new Date(articleData.pubDate)
         : null;
       const imageUrl = articleData.image_url;
+      const keywords = Array.isArray(articleData.keywords)
+        ? articleData.keywords
+            .map((keyword: unknown) => String(keyword).trim())
+            .filter((keyword: string) => keyword.length > 0)
+            .slice(0, 20)
+        : null;
       // NewsData.io country는 전체 국가명 배열(예: ["south korea"])이다.
       const countryRaw = Array.isArray(articleData.country)
         ? articleData.country.join(",") || null
@@ -156,7 +123,9 @@ export function registerProcessWorker(
 
       // 2. Translate title only. Body translation is triggered manually from admin UI.
       console.log(`[Process] Translating title only for article ${externalId}...`);
-      const translatedTitle = await translateToKorean(title);
+      const translatedTitle = await translateToKorean(title, {
+        fallbackToOriginal: true
+      });
       const storedTitle = translatedTitle || title || "No Title";
 
       // 3. Upsert Article (DRAFT)
@@ -177,6 +146,7 @@ export function registerProcessWorker(
         translatedBody: null,
         titleTranslatedAt: translatedTitle ? new Date() : null,
         bodyTranslatedAt: null,
+        keywords,
         publisherCredit,
         country,
         sourceUrl,

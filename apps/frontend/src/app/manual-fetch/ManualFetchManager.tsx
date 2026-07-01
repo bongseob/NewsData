@@ -54,14 +54,6 @@ function joinSelectedValues(values: readonly string[]): string {
   return values.join(",");
 }
 
-function todayLocal(): string {
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, "0");
-  const day = String(now.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
-
 function safeParse(value: string): unknown {
   try {
     return JSON.parse(value);
@@ -83,6 +75,7 @@ function compactPayload(payload: unknown): string {
 }
 
 type SourceTab = "newsdata" | "newswire";
+type FetchRangeMode = "latest" | "archive";
 
 const SOURCE_TABS: { key: SourceTab; label: string; disabled?: boolean }[] = [
   { key: "newsdata", label: "NewsData.io" },
@@ -93,8 +86,9 @@ export function ManualFetchManager(): JSX.Element {
   const [activeSource, setActiveSource] = useState<SourceTab>("newsdata");
   const [q, setQ] = useState("");
   const [categories, setCategories] = useState<NewsDataCategory[]>([]);
-  const [countries, setCountries] = useState<NewsDataCountry[]>(["kr"]);
-  const [languages, setLanguages] = useState<NewsDataLanguage[]>(["ko"]);
+  const [countries, setCountries] = useState<NewsDataCountry[]>(["us"]);
+  const [languages, setLanguages] = useState<NewsDataLanguage[]>(["en"]);
+  const [fetchRange, setFetchRange] = useState<FetchRangeMode>("latest");
   const [countryToAdd, setCountryToAdd] = useState<"" | NewsDataCountry>("");
   const [languageToAdd, setLanguageToAdd] = useState<"" | NewsDataLanguage>("");
   const [domainUrl, setDomainUrl] = useState("");
@@ -129,15 +123,6 @@ export function ManualFetchManager(): JSX.Element {
   useEffect(() => {
     void loadJobs();
   }, [loadJobs]);
-
-  // 시작일/종료일 기본값을 오늘로 설정한다.
-  // 서버/클라이언트 타임존 차이로 인한 hydration 불일치를 피하기 위해
-  // 렌더 시점이 아니라 마운트 후 클라이언트 기준 오늘 날짜를 채운다.
-  useEffect(() => {
-    const today = todayLocal();
-    setFromDate((current) => current || today);
-    setToDate((current) => current || today);
-  }, []);
 
   const toggleCategory = (category: NewsDataCategory) => {
     setMessage(null);
@@ -210,6 +195,12 @@ export function ManualFetchManager(): JSX.Element {
       return;
     }
 
+    if (fetchRange === "archive" && (!fromDate || !toDate)) {
+      setMessage("기간 검색은 시작일과 종료일을 모두 입력해야 합니다.");
+      setSubmitting(false);
+      return;
+    }
+
     const query: Record<string, string | number> = {};
     if (q.trim()) query.q = q.trim();
     if (categories.length > 0) query.category = categories.join(",");
@@ -217,8 +208,10 @@ export function ManualFetchManager(): JSX.Element {
     if (languageString) query.language = languageString;
     if (domainUrl.trim()) query.domainurl = parseCommaValues(domainUrl).join(",");
     if (priorityDomain) query.prioritydomain = priorityDomain;
-    if (fromDate) query.from_date = fromDate;
-    if (toDate) query.to_date = toDate;
+    if (fetchRange === "archive") {
+      query.from_date = fromDate;
+      query.to_date = toDate;
+    }
     if (domain.trim()) query.domain = domain.trim();
     if (size.trim()) query.size = Number(size);
     query.removeduplicate = removeDuplicate ? 1 : 0;
@@ -539,27 +532,63 @@ export function ManualFetchManager(): JSX.Element {
             />
           </label>
 
-          <div className="grid gap-4 sm:grid-cols-2">
-            <label className="grid gap-1 text-sm">
-              <span className="font-semibold text-ink-700">시작일</span>
-              <input
-                type="date"
-                value={fromDate}
-                onChange={(event) => setFromDate(event.target.value)}
-                className="rounded-md border border-line px-3 py-2"
-              />
-            </label>
+          <fieldset className="grid gap-3 rounded-md border border-line p-3">
+            <legend className="text-sm font-semibold text-ink-700">수집 범위</legend>
+            <div className="grid gap-2 sm:grid-cols-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setFetchRange("latest");
+                  setFromDate("");
+                  setToDate("");
+                }}
+                className={`rounded-md px-3 py-2 text-sm font-semibold ${
+                  fetchRange === "latest"
+                    ? "bg-[#1167b1] text-white"
+                    : "border border-line bg-white text-ink-700 hover:bg-slate-50"
+                }`}
+              >
+                최신 뉴스
+              </button>
+              <button
+                type="button"
+                onClick={() => setFetchRange("archive")}
+                className={`rounded-md px-3 py-2 text-sm font-semibold ${
+                  fetchRange === "archive"
+                    ? "bg-[#1167b1] text-white"
+                    : "border border-line bg-white text-ink-700 hover:bg-slate-50"
+                }`}
+              >
+                기간 검색
+              </button>
+            </div>
+            <p className="text-xs text-ink-500">
+              최신 뉴스는 날짜 없이 최신 뉴스 endpoint를 사용합니다. 기간 검색은 날짜를 입력하고 archive endpoint를 사용합니다.
+            </p>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <label className="grid gap-1 text-sm">
+                <span className="font-semibold text-ink-700">시작일</span>
+                <input
+                  type="date"
+                  value={fromDate}
+                  onChange={(event) => setFromDate(event.target.value)}
+                  disabled={fetchRange === "latest"}
+                  className="rounded-md border border-line px-3 py-2 disabled:bg-slate-100 disabled:text-ink-300"
+                />
+              </label>
 
-            <label className="grid gap-1 text-sm">
-              <span className="font-semibold text-ink-700">종료일</span>
-              <input
-                type="date"
-                value={toDate}
-                onChange={(event) => setToDate(event.target.value)}
-                className="rounded-md border border-line px-3 py-2"
-              />
-            </label>
-          </div>
+              <label className="grid gap-1 text-sm">
+                <span className="font-semibold text-ink-700">종료일</span>
+                <input
+                  type="date"
+                  value={toDate}
+                  onChange={(event) => setToDate(event.target.value)}
+                  disabled={fetchRange === "latest"}
+                  className="rounded-md border border-line px-3 py-2 disabled:bg-slate-100 disabled:text-ink-300"
+                />
+              </label>
+            </div>
+          </fieldset>
 
           <label className="flex items-center gap-2 text-sm font-medium">
             <input

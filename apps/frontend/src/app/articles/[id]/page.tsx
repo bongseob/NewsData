@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { Sidebar } from "../../components/Sidebar";
 import { API_BASE } from "../../../lib/api-base";
 import { BodyTranslationButton } from "./BodyTranslationButton";
+import { ImageGenerationButton } from "./ImageGenerationButton";
 import { TranslationEditor } from "./TranslationEditor";
 import { ArticleActions } from "./ArticleActions";
 
@@ -23,6 +24,7 @@ interface ArticleDetail {
   translated_body: string | null;
   title_translated_at: string | null;
   body_translated_at: string | null;
+  keywords: string[] | string | null;
   publisher_credit: string | null;
   country: string | null;
   source_url: string | null;
@@ -31,6 +33,8 @@ interface ArticleDetail {
   created_at: string | null;
   updated_at: string | null;
   thumbnail_local_path?: string | null;
+  thumbnail_source_url?: string | null;
+  thumbnail_is_generated?: number | boolean | null;
 }
 
 async function getArticle(id: string): Promise<ArticleDetail | null> {
@@ -59,6 +63,28 @@ function formatDate(value: string | null): string {
   return value ? new Date(value).toLocaleString("ko-KR") : "N/A";
 }
 
+function normalizeKeywords(value: string[] | string | null): string[] {
+  if (Array.isArray(value)) {
+    return value.map((keyword) => String(keyword).trim()).filter(Boolean);
+  }
+
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value) as unknown;
+      if (Array.isArray(parsed)) {
+        return parsed.map((keyword) => String(keyword).trim()).filter(Boolean);
+      }
+    } catch {
+      return value
+        .split(",")
+        .map((keyword) => keyword.trim())
+        .filter(Boolean);
+    }
+  }
+
+  return [];
+}
+
 export default async function ArticleDetailPage({
   params
 }: {
@@ -73,10 +99,19 @@ export default async function ArticleDetailPage({
   const thumbnail = article.thumbnail_local_path
     ? `${API_BASE}/uploads/thumbnails/${article.thumbnail_local_path.split("/").pop()}`
     : null;
+  const thumbnailFilename = article.thumbnail_local_path?.split("/").pop() ?? null;
+  const isGeneratedThumbnail =
+    !!article.thumbnail_is_generated ||
+    article.thumbnail_source_url?.startsWith("generated:");
+  const thumbnailDownloadUrl =
+    isGeneratedThumbnail && thumbnailFilename
+      ? `${API_BASE}/articles/${article.id}/thumbnail/download`
+      : null;
   const rawPayloadStr = stringifyPayload(article.raw_payload);
   const originalBody = article.original_body || article.body;
   const translatedBody = article.translated_body;
   const displayTitle = article.translated_title || article.title;
+  const keywords = normalizeKeywords(article.keywords);
 
   return (
     <main className="min-h-screen bg-[#f4f6f8] text-ink-950">
@@ -137,7 +172,31 @@ export default async function ArticleDetailPage({
                 )}
 
                 {thumbnail && (
-                  <div className="mt-5 overflow-hidden rounded-lg">
+                  <div className="mt-5 overflow-hidden rounded-lg border border-line bg-slate-50">
+                    <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line px-3 py-2">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-xs font-semibold text-ink-500">
+                          대표 이미지
+                        </span>
+                        {isGeneratedThumbnail ? (
+                          <span className="rounded-full bg-violet-50 px-2 py-0.5 text-xs font-semibold text-violet-700">
+                            AI 대체 이미지
+                          </span>
+                        ) : (
+                          <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-ink-500">
+                            수집 이미지
+                          </span>
+                        )}
+                      </div>
+                      {thumbnailDownloadUrl && (
+                        <a
+                          href={thumbnailDownloadUrl}
+                          className="rounded-md border border-line bg-white px-3 py-1 text-xs font-semibold text-ink-700 hover:bg-slate-50"
+                        >
+                          이미지 다운로드
+                        </a>
+                      )}
+                    </div>
                     <img
                       src={thumbnail}
                       alt={displayTitle}
@@ -145,6 +204,13 @@ export default async function ArticleDetailPage({
                     />
                   </div>
                 )}
+
+                <div className="mt-5">
+                  <ImageGenerationButton
+                    articleId={article.id}
+                    currentThumbnailLocalPath={article.thumbnail_local_path}
+                  />
+                </div>
 
                 <div className="mt-5">
                   <BodyTranslationButton
@@ -158,6 +224,7 @@ export default async function ArticleDetailPage({
                   initialTitle={article.translated_title ?? ""}
                   initialSubtitle={article.translated_subtitle ?? ""}
                   initialBody={translatedBody ?? ""}
+                  initialKeywords={keywords}
                 />
 
                 {originalBody && (
@@ -205,6 +272,23 @@ export default async function ArticleDetailPage({
                         >
                           원문 보기
                         </a>
+                      ) : (
+                        <span className="text-ink-500">N/A</span>
+                      )}
+                    </dd>
+                  </div>
+                  <div className="flex justify-between gap-3">
+                    <dt className="text-ink-500">keywords</dt>
+                    <dd className="flex flex-wrap justify-end gap-1 text-right">
+                      {keywords.length > 0 ? (
+                        keywords.map((keyword) => (
+                          <span
+                            key={keyword}
+                            className="rounded-full bg-slate-100 px-2 py-0.5 text-ink-700"
+                          >
+                            {keyword}
+                          </span>
+                        ))
                       ) : (
                         <span className="text-ink-500">N/A</span>
                       )}

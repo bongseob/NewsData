@@ -7,8 +7,12 @@ import {
   Param,
   Patch,
   Post,
-  Query
+  Query,
+  Res,
+  StreamableFile
 } from "@nestjs/common";
+import { createReadStream, existsSync } from "node:fs";
+import { basename, join } from "node:path";
 import type {
   ArticleReviewState,
   ArticleSource,
@@ -78,6 +82,11 @@ export class ArticlesController {
     return this.articlesService.revertReadyToDraft(body?.ids);
   }
 
+  @Post("translate-bodies")
+  translateBodies(@Body() body: { ids: number[] }) {
+    return this.articlesService.translateBodies(body?.ids);
+  }
+
   @Get(":id")
   async findById(@Param("id") id: string) {
     const article = await this.articlesService.findById(Number(id));
@@ -88,9 +97,56 @@ export class ArticlesController {
     return article;
   }
 
+  @Get(":id/thumbnail/download")
+  async downloadThumbnail(
+    @Param("id") id: string,
+    @Res({ passthrough: true })
+    res: { setHeader(name: string, value: string): void }
+  ) {
+    const article = await this.articlesService.findById(Number(id));
+    if (!article?.thumbnail_local_path || !article.thumbnail_is_generated) {
+      throw new NotFoundException("Generated thumbnail not found.");
+    }
+
+    const filename = basename(article.thumbnail_local_path);
+    const filePath = join(process.cwd(), "uploads", "thumbnails", filename);
+    if (!existsSync(filePath)) {
+      throw new NotFoundException("Generated thumbnail file not found.");
+    }
+
+    res.setHeader("Content-Type", "image/jpeg");
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="${filename}"`
+    );
+
+    return new StreamableFile(createReadStream(filePath));
+  }
+
   @Post(":id/translate-body")
   translateBody(@Param("id") id: string) {
     return this.articlesService.translateBody(Number(id));
+  }
+
+  @Post(":id/generate-image")
+  generateCopyrightSafeImage(@Param("id") id: string) {
+    return this.articlesService.generateCopyrightSafeImage(Number(id));
+  }
+
+  @Post(":id/generate-content")
+  generateContent(
+    @Param("id") id: string,
+    @Body() body: { target?: string }
+  ) {
+    return this.articlesService.generateContent(Number(id), body?.target);
+  }
+
+  @Get(":id/generate-content/:jobId")
+  getContentGenerationStatus(
+    @Param("id") id: string,
+    @Param("jobId") jobId: string
+  ) {
+    return this.articlesService.getContentGenerationStatus(Number(id), jobId);
   }
 
   @Patch(":id/translations")
@@ -101,6 +157,7 @@ export class ArticlesController {
       translatedTitle?: string | null;
       translatedSubtitle?: string | null;
       translatedBody?: string | null;
+      keywords?: string[] | string | null;
     }
   ) {
     return this.articlesService.saveTranslations(Number(id), body ?? {});

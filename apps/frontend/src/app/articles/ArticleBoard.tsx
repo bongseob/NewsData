@@ -23,6 +23,8 @@ export interface BoardArticle {
   created_at?: string | null;
   press_time?: string | null;
   thumbnail_local_path?: string | null;
+  thumbnail_source_url?: string | null;
+  thumbnail_is_generated?: number | boolean | null;
 }
 
 export type BoardSortColumn = "updated_at" | "created_at" | "press_time";
@@ -71,7 +73,8 @@ const TABS: { key: BoardTab; label: string }[] = [
 type BulkAction =
   | { kind: "review"; reviewState: string; label: string; confirm: string }
   | { kind: "ready"; label: string; confirm: string }
-  | { kind: "unready"; label: string; confirm: string };
+  | { kind: "unready"; label: string; confirm: string }
+  | { kind: "translate"; label: string; confirm: string };
 
 const TAB_ACTIONS: Record<BoardTab, BulkAction[]> = {
   pending: [
@@ -89,6 +92,11 @@ const TAB_ACTIONS: Record<BoardTab, BulkAction[]> = {
     }
   ],
   selected: [
+    {
+      kind: "translate",
+      label: "본문 일괄 번역",
+      confirm: "선택한 기사의 본문 번역 작업을 등록할까요? DeepL 사용량이 차감됩니다."
+    },
     {
       kind: "ready",
       label: "최종 발행 대상 확정",
@@ -228,7 +236,9 @@ export function ArticleBoard({
           ? "mark-ready"
           : action.kind === "unready"
             ? "unmark-ready"
-            : "review-state";
+            : action.kind === "translate"
+              ? "translate-bodies"
+              : "review-state";
       const endpoint = `${API_BASE}/articles/${endpointPath}`;
       const payload =
         action.kind === "review"
@@ -247,8 +257,18 @@ export function ArticleBoard({
         return;
       }
 
-      const data = (await res.json()) as { updated?: number };
-      setMessage(`${data.updated ?? 0}건 처리되었습니다.`);
+      const data = (await res.json()) as {
+        updated?: number;
+        queued?: Array<{ articleId: number }>;
+        skipped?: Array<{ articleId: number; reason: string }>;
+      };
+      if (action.kind === "translate") {
+        setMessage(
+          `번역 작업 ${data.queued?.length ?? 0}건 등록, ${data.skipped?.length ?? 0}건 제외`
+        );
+      } else {
+        setMessage(`${data.updated ?? 0}건 처리되었습니다.`);
+      }
       setSelected(new Set());
       router.refresh();
     } catch {
@@ -422,12 +442,18 @@ export function ArticleBoard({
                   </td>
                   <td className="px-4 py-3">
                     {article.thumbnail_local_path ? (
-                      <div className="h-12 w-12 overflow-hidden rounded bg-slate-100">
+                      <div className="relative h-12 w-12 overflow-hidden rounded bg-slate-100">
                         <img
                           src={`${API_BASE}/uploads/thumbnails/${article.thumbnail_local_path.split("/").pop()}`}
                           alt={article.title}
                           className="h-full w-full object-cover"
                         />
+                        {(article.thumbnail_is_generated ||
+                          article.thumbnail_source_url?.startsWith("generated:")) && (
+                          <span className="absolute bottom-0 left-0 right-0 bg-violet-700/90 py-0.5 text-center text-[9px] font-bold text-white">
+                            AI
+                          </span>
+                        )}
                       </div>
                     ) : (
                       <div className="flex h-12 w-12 items-center justify-center rounded bg-slate-100 text-[10px] text-ink-300">

@@ -17,7 +17,18 @@
 - [x] ORM 없이 `mysql2/promise` + repository layer를 사용한다.
 - [x] Queue는 Redis + BullMQ를 사용한다.
 - [x] API request 내부에서 Playwright를 실행하지 않고 worker로 분리한다.
-- [ ] 구현 완료 항목은 typecheck/build 통과 후 이 문서에 체크한다.
+- [x] 구현 완료 항목은 typecheck/build 통과 후 이 문서에 체크한다.
+
+### 2026-07-01 상태 점검
+
+- [x] 현재 브랜치: `main`.
+- [x] 현재 HEAD: `03a503d feat: 수동 수집 화면에 소스 선택 탭 추가`.
+- [x] `origin/main`과 동기화됨: `git rev-list --left-right --count HEAD...origin/main` = `0 0`.
+- [x] working tree clean.
+- [x] `npm run typecheck` 통과.
+- [x] `npm run build` 통과.
+- [x] WP-3 완료: `POST /articles/:id/translate-body`와 `POST /articles/translate-bodies`는 translate queue에 enqueue하고, DeepL 호출은 worker에서 수행한다.
+- [!] 다음 우선순위는 WP-4 큐레이션 → 발행 브리지다.
 
 ## 1. 현재 구현됨
 
@@ -94,17 +105,17 @@
 
 ### WP-3. 일괄 번역 큐 연동 (PROJECT_RULES 4 준수)
 
-목표: 현재 단건 본문 번역(`POST /articles/:id/translate-body`)은 DeepL 호출을 **API request 안에서** 실행해 PROJECT_RULES("외부 API 호출은 worker로 분리")에 어긋난다. 일괄 번역 도입과 함께 worker로 이전한다.
+목표: 단건 본문 번역(`POST /articles/:id/translate-body`)과 일괄 본문 번역을 DeepL 동기 호출이 아닌 queue/worker 방식으로 처리해 PROJECT_RULES("외부 API 호출은 worker로 분리")를 준수한다.
 
-- [ ] `packages/shared/src/queues.ts` `QUEUE_NAMES`에 `translate` 큐 추가(또는 process 큐 job type 분기).
-- [ ] translate job 데이터 계약 정의: `{ articleId, target: "BODY" | "TITLE" | "SUBTITLE" }`.
-- [ ] Backend producer: `POST /articles/translate-bodies` `{ ids: number[] }` — 선별됨 다건에 대해 article별 translate job enqueue.
+- [x] `packages/shared/src/queues.ts` `QUEUE_NAMES`에 `translate` 큐 추가(또는 process 큐 job type 분기).
+- [x] translate job 데이터 계약 정의: `{ articleId, target: "BODY" | "TITLE" | "SUBTITLE" }`.
+- [x] Backend producer: `POST /articles/translate-bodies` `{ ids: number[] }` — 선별됨 다건에 대해 article별 translate job enqueue.
   - 파일: [queue.providers.ts](apps/backend/src/queue/queue.providers.ts)에 translate 큐 producer 추가, articles.service에서 enqueue.
-- [ ] Worker consumer: `apps/worker/src/queue/register-translate-worker.ts` 신규 — DeepL 호출 후 [articles.repository.ts](packages/db/src/repositories/articles.repository.ts) `updateBodyTranslation` 사용.
+- [x] Worker consumer: `apps/worker/src/queue/register-translate-worker.ts` 신규 — DeepL 호출 후 [articles.repository.ts](packages/db/src/repositories/articles.repository.ts) `updateBodyTranslation` 사용.
   - 기존 [register-process-worker.ts](apps/worker/src/queue/register-process-worker.ts)의 `translateToKorean` 헬퍼를 공용 모듈로 추출해 재사용.
-- [ ] 단건 `translate-body`도 동일 큐 enqueue 방식으로 이전(동기 DeepL 호출 제거). 호환을 위해 enqueue 후 job id 반환.
-- [ ] 보드 "선별됨" 탭에 `본문 일괄 번역` 액션 추가([ArticleBoard.tsx](apps/frontend/src/app/articles/ArticleBoard.tsx)).
-- [ ] DeepL 사용량/실패 처리: 실패 시 article 변경 없이 재시도(BullMQ retry), 실패 로그 남김.
+- [x] 단건 `translate-body`도 동일 큐 enqueue 방식으로 이전(동기 DeepL 호출 제거). 호환을 위해 enqueue 후 job id 반환.
+- [x] 보드 "선별됨" 탭에 `본문 일괄 번역` 액션 추가([ArticleBoard.tsx](apps/frontend/src/app/articles/ArticleBoard.tsx)).
+- [x] DeepL 사용량/실패 처리: 실패 시 article 변경 없이 재시도(BullMQ retry), 실패 로그 남김.
 
 ### WP-4. 큐레이션 → 발행 브리지 (수동 정리 안정화 후 → 섹션 6 연결)
 
@@ -128,9 +139,9 @@
 - [ ] 현재 진행 중 변경분을 검토하고 커밋 단위로 분리한다.
 - [ ] `.env.example`이 실제 secret 없이 필요한 키 이름만 포함하는지 재확인한다.
 - [ ] tracked runtime placeholder와 ignored runtime artifact 경계를 재확인한다.
-- [ ] `README.md`의 Current Implementation Status를 최신 상태로 갱신한다.
-- [ ] `docs/architecture.md`의 Open Inputs를 현재 결정/미결정 상태로 갱신한다.
-- [ ] 최소 smoke test 절차를 `docs/operations.md`에 추가한다.
+- [x] `README.md`의 Current Implementation Status를 최신 상태로 갱신한다.
+- [x] `docs/architecture.md`의 Open Inputs를 현재 결정/미결정 상태로 갱신한다.
+- [x] 최소 smoke test 절차를 `docs/operations.md`에 추가한다.
 
 ## 3. DB Repository 확장
 
@@ -233,7 +244,7 @@
 - [ ] image/video는 원본 전체 사용이 아닌 thumbnail 처리 정책으로 제한했는지 재확인.
 - [ ] publisher credit 표시/저장 검증.
 - [x] country(국가) 저장 및 목록/상세 표시: raw_payload country 배열을 컬럼으로 정규화.
-- [x] 수동 수집 from_date/to_date 기본값을 오늘로 설정.
+- [x] 수동 수집 기본값은 최신 뉴스 모드로 설정하고, from_date/to_date는 기간 검색 모드에서만 전송.
 - [ ] auto publish policy 적용: 기본 `DRAFT`, 설정 시 `READY_TO_PUBLISH`.
 
 ## 9. Newswire 수집/처리
@@ -290,6 +301,8 @@
 
 - [x] `npm run typecheck` 통과.
 - [x] `npm run build` 통과.
+- [x] 2026-07-01 상태 점검에서 `main` / `03a503d` 기준 typecheck/build 재통과.
+- [x] WP-3 번역 큐 구현 후 `npm run build` / `npm run typecheck` 재통과.
 - [~] local DB migration clean apply 검증: 001 자동 mount, 002 적용 가정. 003(review_state)/004(country)는 로컬 `newsdata` DB에 적용·백필 완료. 신규 환경에서 001~004 순차 clean apply는 재검증 필요.
 - [ ] backend boot 검증.
 - [ ] frontend boot 검증.
@@ -328,6 +341,8 @@
 - [x] NewsData.io language supports comma-separated values, max 5.
 - [x] NewsData.io domainurl supports comma-separated values, max 5.
 - [x] NewsData.io prioritydomain supports `top`, `medium`, `low`.
+- [x] NewsData.io requests with `from_date` or `to_date` use `/api/1/archive`; latest requests without dates use `/api/1/news`.
+- [x] Manual fetch defaults to latest news mode with no dates; archive/date search is explicit.
 - [x] NewsData.io country/language manual fetch UI uses dropdown selection.
 - [x] NewsData.io country/language selected values generate comma-separated query strings.
 - [x] NewsData.io country/language UI prevents duplicate selection and provides reset buttons.
