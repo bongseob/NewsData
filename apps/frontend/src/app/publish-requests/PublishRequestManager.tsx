@@ -80,6 +80,34 @@ export function PublishRequestManager({
     }
   }, []);
 
+  const republish = useCallback(
+    async (jobId: number) => {
+      if (
+        !window.confirm(
+          "이 기사를 다시 발행 요청할까요? d-maker에 기사가 다시 등록됩니다."
+        )
+      ) {
+        return;
+      }
+      try {
+        const res = await fetch(
+          `${API_BASE}/publish-requests/${jobId}/republish`,
+          { method: "POST" }
+        );
+        if (!res.ok) {
+          setMessage(`재발행 실패: ${await res.text()}`);
+          return;
+        }
+        setMessage("재발행 요청을 등록했습니다.");
+        void refreshJobs();
+        router.refresh();
+      } catch (error) {
+        setMessage(error instanceof Error ? error.message : "재발행 실패");
+      }
+    },
+    [refreshJobs, router]
+  );
+
   // 진행 중인 작업이 있으면 3초, 없으면 20초 간격으로 상태를 모니터링한다.
   useEffect(() => {
     const delay = hasActiveJobs ? 3000 : 20000;
@@ -283,9 +311,20 @@ export function PublishRequestManager({
                     {job.error_message}
                   </p>
                 ) : null}
-                <p className="mt-2 text-xs text-ink-500">
-                  {new Date(job.updated_at || job.created_at).toLocaleString("ko-KR")}
-                </p>
+                <div className="mt-2 flex items-center justify-between gap-2">
+                  <p className="text-xs text-ink-500">
+                    {new Date(job.updated_at || job.created_at).toLocaleString("ko-KR")}
+                  </p>
+                  {ACTIVE_STATUSES.includes(job.status) ? null : (
+                    <button
+                      className="rounded-md border border-line px-2.5 py-1 text-xs font-semibold text-[#0f5f9f] hover:bg-slate-50"
+                      onClick={() => void republish(job.id)}
+                      type="button"
+                    >
+                      재발행
+                    </button>
+                  )}
+                </div>
               </div>
             ))
           )}

@@ -48,4 +48,9 @@ export class PublishController {
   retry(@Param("id", ParseIntPipe) id: number) {
     return this.publishService.retry(id);
   }
+
+  @Post(":id/republish")
+  republish(@Param("id", ParseIntPipe) id: number) {
+    return this.publishService.republish(id);
+  }
 }

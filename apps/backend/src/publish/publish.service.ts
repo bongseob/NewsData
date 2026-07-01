@@ -161,6 +161,66 @@ export class PublishService {
     };
   }
 
+  /**
+   * 이미 발행(또는 실패)된 기사를 다시 발행 요청한다.
+   * 기사 상태를 발행 대기로 되돌리고 새 발행 job을 생성한다.
+   */
+  async republish(id: number): Promise<{
+    publishJobId: number;
+    articleId: number;
+    queue: string;
+    queueJobId: string | undefined;
+    status: "QUEUED";
+  }> {
+    const publishJobsRepository = new PublishJobsRepository(this.pool);
+    const articlesRepository = new ArticlesRepository(this.pool);
+
+    const publishJob = await publishJobsRepository.findById(id);
+    if (!publishJob) {
+      throw new NotFoundException("Publish job not found.");
+    }
+
+    const articleId = publishJob.article_id;
+    if (await publishJobsRepository.hasActiveJob(articleId)) {
+      throw new BadRequestException(
+        "이미 진행 중인 발행 작업이 있어 재발행할 수 없습니다."
+      );
+    }
+
+    // 재발행을 위해 기사 상태를 발행 대기로 되돌린다.
+    await articlesRepository.updateStatus(
+      articleId,
+      ARTICLE_STATUSES.readyToPublish
+    );
+
+    const publishJobId = await publishJobsRepository.create({
+      articleId,
+      status: JOB_STATUSES.pending,
+      requestedBy: publishJob.requested_by
+    });
+    const queueJobId = `publish-${publishJobId}`;
+    const job = await this.publishQueue.add(
+      "publish-article",
+      { articleId, publishJobId },
+      {
+        jobId: queueJobId,
+        attempts: 2,
+        backoff: {
+          type: "exponential",
+          delay: 30000
+        }
+      }
+    );
+
+    return {
+      publishJobId,
+      articleId,
+      queue: QUEUE_NAMES.publish,
+      queueJobId: job.id,
+      status: "QUEUED"
+    };
+  }
+
   private normalizeIds(ids: unknown): number[] {
     if (!Array.isArray(ids)) {
       throw new BadRequestException("ids must be an array.");
