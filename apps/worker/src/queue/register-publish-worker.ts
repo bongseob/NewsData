@@ -133,21 +133,8 @@ async function fillSubtitle(page: Page, subtitle: string): Promise<void> {
     const locator = page.locator(selector).first();
     if ((await locator.count()) === 0) continue;
     if (!(await locator.isVisible().catch(() => false))) continue;
-
-    const tag = await locator
-      .evaluate((el) => el.tagName.toLowerCase())
-      .catch(() => "input");
-    // textarea면 3줄을 유지하고, 단일 라인 input이면 줄바꿈이 제거되므로
-    // 불릿("- ")을 떼고 한 줄로 합쳐 문장이 붙지 않게 한다.
-    const value =
-      tag === "textarea"
-        ? subtitle
-        : subtitle
-            .split(/\r?\n/)
-            .map((line) => line.replace(/^\s*-\s*/, "").trim())
-            .filter((line) => line.length > 0)
-            .join(" ");
-    await locator.fill(value, { timeout: 5000 });
+    // d-maker #subTitle은 여러 줄(- 문장1\n- 문장2\n- 문장3)을 그대로 받는다.
+    await locator.fill(subtitle, { timeout: 5000 });
     return;
   }
 
@@ -284,43 +271,69 @@ async function uploadArticlePhoto(
   }
 }
 
-function getKeywordSelectors(): string[] {
-  return [
-    process.env.DMAKER_KEYWORD_SELECTOR || "",
-    // d-maker 키워드는 jQuery Tag-it 위젯이라 #keyword는 숨김 필드다.
-    // 실제 입력은 태그 목록(ul.tagit)의 보이는 입력창에서 이뤄진다.
-    "ul.tagit li.tagit-new input",
-    "ul.tagit input.ui-autocomplete-input",
-    ".tagit-new input",
-    "ul.tagit input[type='text']",
-    "#keyword",
-    "#keywords",
-    'input[name="keyword"]',
-    'input[name="keywords"]',
-    'textarea[name="keyword"]',
-    'textarea[name="keywords"]'
-  ].filter(Boolean);
+// d-maker 키워드는 jQuery Tag-it 위젯이라 보이는 입력창에 값을 넣고
+// Space를 눌러 각 태그를 커밋한다(그래서 키워드에 공백이 없어야 한다).
+async function fillKeywords(page: Page, keywords: string[]): Promise<void> {
+  const selector =
+    process.env.DMAKER_KEYWORD_SELECTOR || ".tagit-new input.ui-autocomplete-input";
+  const tagInput = page.locator(selector).first();
+  await tagInput.waitFor({ state: "visible", timeout: 10000 });
+
+  for (const keyword of keywords) {
+    const cleanTag = keyword.replace(/^#/, "").trim();
+    if (!cleanTag) continue;
+    await tagInput.fill(cleanTag);
+    await tagInput.press("Space"); // Tag-it은 Space로 태그를 커밋한다.
+    await page.waitForTimeout(100); // UI 반영 대기
+  }
 }
 
-// ", "로 구분된 키워드를 키워드 필드에 입력하되, 각 키워드마다 Enter로 구분한다.
-async function fillKeywords(page: Page, keywords: string[]): Promise<void> {
-  for (const selector of getKeywordSelectors()) {
-    const locator = page.locator(selector).first();
-    if ((await locator.count()) === 0) continue;
-    // 숨김 필드(tagit-hidden-field 등)는 클릭이 불가하므로 건너뛴다.
-    if (!(await locator.isVisible().catch(() => false))) continue;
+// 본문은 CKEditor "텍스트로 붙여넣기" 팝업으로 입력하면 줄바꿈이 보존된다.
+async function fillArticleBody(page: Page, body: string): Promise<void> {
+  try {
+    const pasteButton = page
+      .locator(".cke_button__pastetext:not(.cke_button_disabled)")
+      .first();
+    await pasteButton.waitFor({ state: "visible", timeout: 15000 });
+    await pasteButton.click();
 
-    await locator.click({ timeout: 5000 });
-    for (const keyword of keywords) {
-      await page.keyboard.type(keyword);
-      await page.keyboard.press("Enter");
+    await page.waitForSelector(".cke_pasteframe", { state: "visible" });
+    const pasteFrame = page.frameLocator(".cke_pasteframe");
+    await pasteFrame.locator("body").focus();
+    await page.keyboard.insertText(body);
+
+    try {
+      await page.click(".cke_dialog_ui_button_ok");
+    } catch {
+      await page.locator('.cke_dialog a[title="확인"]').click();
     }
+
+    await page.waitForSelector(".cke_pasteframe", { state: "hidden" });
+    await page.waitForTimeout(500);
     return;
+  } catch (error) {
+    console.warn(
+      "[Publish] CKEditor paste failed, falling back to editor injection",
+      error
+    );
   }
 
-  throw new Error(
-    `Visible keyword field not found. Tried selectors: ${getKeywordSelectors().join(", ")}`
+  // 폴백: 편집기 iframe / textarea에 직접 주입한다.
+  const bodyHtml = toEditorHtml(body);
+  const editorIframe = await page.$(
+    'iframe.cke_wysiwyg_frame, iframe[title*="editor"], iframe[id*="editor"]'
   );
+  if (editorIframe) {
+    const frame = await editorIframe.contentFrame();
+    if (frame) {
+      await frame.evaluate((htmlContent: string) => {
+        document.body.innerHTML = htmlContent;
+      }, bodyHtml);
+    }
+  } else {
+    const textarea = await page.$('textarea[name="content"], textarea#content');
+    if (textarea) await textarea.fill(body);
+  }
 }
 
 export function registerPublishWorker(connection: ConnectionOptions): Worker {
@@ -371,15 +384,21 @@ export function registerPublishWorker(connection: ConnectionOptions): Worker {
         await page.goto(getLoginUrl());
         await page.fill("#user_id", adminId);
         await page.fill("#user_pw", adminPw);
+        // 로그인 제출 후 페이지 이동을 확실히 대기한다.
+        // (networkidle는 불안정하고, 실패를 삼키면 로그인 미완료 상태로 진행되어 간헐 실패가 발생한다.)
         await Promise.all([
-          page.waitForNavigation({ waitUntil: "networkidle" }).catch(() => {}),
-          page.click('button[type="submit"], input[type="submit"], .login-btn').catch(() => page.keyboard.press("Enter"))
+          page.waitForNavigation({ timeout: 30000 }),
+          page.click('button[type="submit"]')
         ]);
 
+        // 로그인 실패 시 로그인 폼(#user_id)이 그대로 남으므로 검증한다.
+        if ((await page.locator("#user_id").count()) > 0) {
+          throw new Error("Login failed: still on the admin login form after submit.");
+        }
+
         failedStep = PUBLISH_FAILED_STEPS.openForm;
-        await page.goto(getWriteUrl(), {
-          waitUntil: "networkidle"
-        });
+        await page.goto(getWriteUrl());
+        await page.waitForLoadState("networkidle").catch(() => undefined);
 
         failedStep = PUBLISH_FAILED_STEPS.fillForm;
         await page.selectOption("#sectionCode", "S1N1").catch((error) => {
@@ -387,6 +406,7 @@ export function registerPublishWorker(connection: ConnectionOptions): Worker {
         });
 
         await page.fill("#title", getArticleTitle(article));
+
         const subtitle = getArticleSubtitle(article);
         if (subtitle) {
           await fillSubtitle(page, subtitle).catch((error) => {
@@ -394,26 +414,7 @@ export function registerPublishWorker(connection: ConnectionOptions): Worker {
           });
         }
 
-        const body = getArticleBody(article);
-        if (!body) {
-          throw new Error("Article body is empty.");
-        }
-
-        const bodyHtml = toEditorHtml(body);
-        const editorIframe = await page.$('iframe[title*="editor"], iframe[id*="editor"]');
-        if (editorIframe) {
-          const frame = await editorIframe.contentFrame();
-          if (frame) {
-            await frame.evaluate((htmlContent: string) => {
-              document.body.innerHTML = htmlContent;
-            }, bodyHtml);
-          }
-        } else {
-          // 일반 textarea 편집기는 원문(줄바꿈 포함)을 그대로 넣는다.
-          const textarea = await page.$('textarea[name="content"], textarea#content');
-          if (textarea) await textarea.fill(body);
-        }
-
+        // 키워드는 본문(CKEditor)보다 먼저 입력한다.
         const keywords = getArticleKeywords(article);
         if (keywords.length > 0) {
           await fillKeywords(page, keywords).catch((error) => {
@@ -421,12 +422,20 @@ export function registerPublishWorker(connection: ConnectionOptions): Worker {
           });
         }
 
+        // 본문은 마지막에 입력한다(CKEditor 붙여넣기 팝업 사용).
+        const body = getArticleBody(article);
+        if (!body) {
+          throw new Error("Article body is empty.");
+        }
+        await fillArticleBody(page, body);
+
         failedStep = PUBLISH_FAILED_STEPS.submit;
         page.on("dialog", async (dialog) => {
           await dialog.accept().catch(() => undefined);
         });
         const submitSelector = await clickFirstAvailable(page, [
           process.env.DMAKER_SUBMIT_SELECTOR || "",
+          'button[type="submit"].nd-pink',
           "#btnSubmit",
           "#btn_submit",
           ".btn_submit",
