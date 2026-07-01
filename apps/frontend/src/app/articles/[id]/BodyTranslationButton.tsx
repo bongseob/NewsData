@@ -53,7 +53,7 @@ export function BodyTranslationButton({
 
   const translate = async () => {
     const confirmed = window.confirm(
-      "DeepL 사용량이 차감됩니다. 본문 번역 작업을 등록할까요?"
+      "OpenAI 사용량이 차감됩니다. 본문 번역 작업을 등록할까요?"
     );
     if (!confirmed) return;
 

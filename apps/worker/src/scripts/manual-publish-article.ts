@@ -110,9 +110,15 @@ function titleMatches(pageText: string, title: string): boolean {
 async function resolveThumbnailPath(localPath: string): Promise<string> {
   const filename = path.basename(localPath);
   const candidates = [
+    localPath,
+    process.env.THUMBNAIL_DIR
+      ? path.resolve(process.env.THUMBNAIL_DIR, filename)
+      : "",
+    // 이미지 워커가 저장하는 위치: apps/backend/uploads/thumbnails
+    path.resolve(process.cwd(), "..", "backend", "uploads", "thumbnails", filename),
     path.resolve(process.cwd(), "uploads", "thumbnails", filename),
     path.resolve(process.cwd(), "apps", "backend", "uploads", "thumbnails", filename)
-  ];
+  ].filter(Boolean);
 
   for (const candidate of candidates) {
     try {

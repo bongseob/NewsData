@@ -1,10 +1,11 @@
 import { Worker, type ConnectionOptions } from "bullmq";
 import { chromium } from "playwright-extra";
-import type { Page } from "playwright";
+import type { BrowserContext, Page } from "playwright";
 import stealth from "puppeteer-extra-plugin-stealth";
 import path from "node:path";
 import fs from "node:fs/promises";
 import {
+  ARTICLE_SOURCES,
   ARTICLE_STATUSES,
   JOB_STATUSES,
   PUBLISH_FAILED_STEPS,
@@ -46,15 +47,113 @@ function getArticleTitle(article: ArticleRow): string {
 }
 
 function getArticleSubtitle(article: ArticleRow): string | null {
-  return article.translated_subtitle || article.subtitle;
+  if (article.translated_subtitle) {
+    return article.translated_subtitle;
+  }
+  // 뉴스와이어(국내 보도자료)만 원본 부제목(한국어)을 폴백으로 허용한다.
+  // NewsData 등 해외 소스의 외국어 원문 부제목은 발행하지 않는다.
+  if (article.source === ARTICLE_SOURCES.newswire) {
+    return article.subtitle;
+  }
+  return null;
 }
 
 function getArticleBody(article: ArticleRow): string | null {
   return article.translated_body || article.original_body || article.body;
 }
 
+function getArticleKeywords(article: ArticleRow): string[] {
+  const raw = article.keywords;
+  if (Array.isArray(raw)) {
+    return raw.map((value) => String(value).trim()).filter((value) => value.length > 0);
+  }
+
+  if (typeof raw === "string") {
+    const text = raw.trim();
+    if (!text) return [];
+    try {
+      const parsed = JSON.parse(text);
+      if (Array.isArray(parsed)) {
+        return parsed.map((value) => String(value).trim()).filter((value) => value.length > 0);
+      }
+    } catch {
+      // Fall back to delimiter-based parsing.
+    }
+    return text
+      .split(/[,\n]/)
+      .map((value) => value.trim())
+      .filter((value) => value.length > 0);
+  }
+
+  return [];
+}
+
 function formatError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+function looksLikeHtml(value: string): boolean {
+  return /<(p|br|div|span|img|ul|ol|li|h[1-6]|table|strong|em|a)\b/i.test(value);
+}
+
+// 편집기 innerHTML에 그대로 넣으면 줄바꿈이 사라지므로 문단/개행을 HTML로 변환한다.
+function toEditorHtml(text: string): string {
+  if (looksLikeHtml(text)) {
+    return text;
+  }
+  const blocks = text
+    .split(/\r?\n\s*\r?\n/)
+    .map((block) => block.trim())
+    .filter((block) => block.length > 0)
+    .map((block) => `<p>${escapeHtml(block).replace(/\r?\n/g, "<br />")}</p>`);
+  return blocks.length > 0 ? blocks.join("\n") : `<p>${escapeHtml(text)}</p>`;
+}
+
+function getSubtitleSelectors(): string[] {
+  return [
+    process.env.DMAKER_SUBTITLE_SELECTOR || "",
+    "#subTitle",
+    "#subtitle",
+    'input[name="subTitle"]',
+    'input[name="subtitle"]',
+    'textarea[name="subTitle"]',
+    'textarea[name="subtitle"]'
+  ].filter(Boolean);
+}
+
+async function fillSubtitle(page: Page, subtitle: string): Promise<void> {
+  for (const selector of getSubtitleSelectors()) {
+    const locator = page.locator(selector).first();
+    if ((await locator.count()) === 0) continue;
+    if (!(await locator.isVisible().catch(() => false))) continue;
+
+    const tag = await locator
+      .evaluate((el) => el.tagName.toLowerCase())
+      .catch(() => "input");
+    // textarea면 3줄을 유지하고, 단일 라인 input이면 줄바꿈이 제거되므로
+    // 불릿("- ")을 떼고 한 줄로 합쳐 문장이 붙지 않게 한다.
+    const value =
+      tag === "textarea"
+        ? subtitle
+        : subtitle
+            .split(/\r?\n/)
+            .map((line) => line.replace(/^\s*-\s*/, "").trim())
+            .filter((line) => line.length > 0)
+            .join(" ");
+    await locator.fill(value, { timeout: 5000 });
+    return;
+  }
+
+  throw new Error(
+    `Visible subtitle field not found. Tried selectors: ${getSubtitleSelectors().join(", ")}`
+  );
 }
 
 function getLoginUrl(): string {
@@ -114,9 +213,15 @@ function titleMatches(pageText: string, title: string): boolean {
 async function resolveThumbnailPath(localPath: string): Promise<string> {
   const filename = path.basename(localPath);
   const candidates = [
+    localPath,
+    process.env.THUMBNAIL_DIR
+      ? path.resolve(process.env.THUMBNAIL_DIR, filename)
+      : "",
+    // 이미지 워커가 저장하는 위치: apps/backend/uploads/thumbnails
+    path.resolve(process.cwd(), "..", "backend", "uploads", "thumbnails", filename),
     path.resolve(process.cwd(), "uploads", "thumbnails", filename),
     path.resolve(process.cwd(), "apps", "backend", "uploads", "thumbnails", filename)
-  ];
+  ].filter(Boolean);
 
   for (const candidate of candidates) {
     try {
@@ -128,6 +233,94 @@ async function resolveThumbnailPath(localPath: string): Promise<string> {
   }
 
   throw new Error(`Thumbnail file not found: ${filename}`);
+}
+
+function getPhotoWriteUrl(idxno: string): string {
+  const pattern = process.env.DMAKER_PHOTO_WRITE_URL_PATTERN;
+  if (pattern?.includes("{idxno}")) {
+    return pattern.replace("{idxno}", idxno);
+  }
+
+  return `https://www.d-maker.kr/news/photoWriteForm.html?mode=input&article_idxno=${idxno}`;
+}
+
+// 이미지는 기사 생성 후 idxno 기준 photoWriteForm 팝업에서 업로드한다.
+async function uploadArticlePhoto(
+  context: BrowserContext,
+  idxno: string,
+  absoluteThumbPath: string
+): Promise<void> {
+  const photoPage = await context.newPage();
+  photoPage.on("dialog", async (dialog) => {
+    await dialog.accept().catch(() => undefined);
+  });
+
+  try {
+    await photoPage.goto(getPhotoWriteUrl(idxno), { waitUntil: "networkidle" });
+
+    const fileInput = photoPage.locator('input[type="file"]').first();
+    if ((await fileInput.count()) === 0) {
+      throw new Error("Photo upload file input not found on photoWriteForm.");
+    }
+    await fileInput.setInputFiles(absoluteThumbPath);
+
+    const submitSelector = await clickFirstAvailable(photoPage, [
+      process.env.DMAKER_PHOTO_SUBMIT_SELECTOR || "",
+      "#btnSubmit",
+      "#btn_submit",
+      ".btn_submit",
+      'button[type="submit"]',
+      'input[type="submit"]',
+      'button:has-text("등록")',
+      'a:has-text("등록")',
+      'input[value*="등록"]',
+      'button:has-text("저장")',
+      'input[value*="저장"]'
+    ]);
+    console.log(`[Publish] Photo submit clicked with selector: ${submitSelector}`);
+    await photoPage.waitForLoadState("networkidle", { timeout: 15000 }).catch(() => undefined);
+  } finally {
+    await photoPage.close().catch(() => undefined);
+  }
+}
+
+function getKeywordSelectors(): string[] {
+  return [
+    process.env.DMAKER_KEYWORD_SELECTOR || "",
+    // d-maker 키워드는 jQuery Tag-it 위젯이라 #keyword는 숨김 필드다.
+    // 실제 입력은 태그 목록(ul.tagit)의 보이는 입력창에서 이뤄진다.
+    "ul.tagit li.tagit-new input",
+    "ul.tagit input.ui-autocomplete-input",
+    ".tagit-new input",
+    "ul.tagit input[type='text']",
+    "#keyword",
+    "#keywords",
+    'input[name="keyword"]',
+    'input[name="keywords"]',
+    'textarea[name="keyword"]',
+    'textarea[name="keywords"]'
+  ].filter(Boolean);
+}
+
+// ", "로 구분된 키워드를 키워드 필드에 입력하되, 각 키워드마다 Enter로 구분한다.
+async function fillKeywords(page: Page, keywords: string[]): Promise<void> {
+  for (const selector of getKeywordSelectors()) {
+    const locator = page.locator(selector).first();
+    if ((await locator.count()) === 0) continue;
+    // 숨김 필드(tagit-hidden-field 등)는 클릭이 불가하므로 건너뛴다.
+    if (!(await locator.isVisible().catch(() => false))) continue;
+
+    await locator.click({ timeout: 5000 });
+    for (const keyword of keywords) {
+      await page.keyboard.type(keyword);
+      await page.keyboard.press("Enter");
+    }
+    return;
+  }
+
+  throw new Error(
+    `Visible keyword field not found. Tried selectors: ${getKeywordSelectors().join(", ")}`
+  );
 }
 
 export function registerPublishWorker(connection: ConnectionOptions): Worker {
@@ -196,7 +389,7 @@ export function registerPublishWorker(connection: ConnectionOptions): Worker {
         await page.fill("#title", getArticleTitle(article));
         const subtitle = getArticleSubtitle(article);
         if (subtitle) {
-          await page.fill("#subTitle", subtitle).catch((error) => {
+          await fillSubtitle(page, subtitle).catch((error) => {
             console.warn("[Publish] subTitle fill failed", error);
           });
         }
@@ -206,26 +399,26 @@ export function registerPublishWorker(connection: ConnectionOptions): Worker {
           throw new Error("Article body is empty.");
         }
 
+        const bodyHtml = toEditorHtml(body);
         const editorIframe = await page.$('iframe[title*="editor"], iframe[id*="editor"]');
         if (editorIframe) {
           const frame = await editorIframe.contentFrame();
           if (frame) {
             await frame.evaluate((htmlContent: string) => {
               document.body.innerHTML = htmlContent;
-            }, body);
+            }, bodyHtml);
           }
         } else {
+          // 일반 textarea 편집기는 원문(줄바꿈 포함)을 그대로 넣는다.
           const textarea = await page.$('textarea[name="content"], textarea#content');
           if (textarea) await textarea.fill(body);
         }
 
-        if (article.thumbnail_local_path) {
-          failedStep = PUBLISH_FAILED_STEPS.uploadImage;
-          const absoluteThumbPath = await resolveThumbnailPath(article.thumbnail_local_path);
-          const fileInput = await page.$('input[type="file"]');
-          if (fileInput) {
-            await page.setInputFiles('input[type="file"]', absoluteThumbPath);
-          }
+        const keywords = getArticleKeywords(article);
+        if (keywords.length > 0) {
+          await fillKeywords(page, keywords).catch((error) => {
+            console.warn("[Publish] keyword fill failed", error);
+          });
         }
 
         failedStep = PUBLISH_FAILED_STEPS.submit;
@@ -256,6 +449,22 @@ export function registerPublishWorker(connection: ConnectionOptions): Worker {
           throw new Error("Published article idxno could not be extracted after submit.");
         }
 
+        if (article.thumbnail_local_path) {
+          failedStep = PUBLISH_FAILED_STEPS.uploadImage;
+          const absoluteThumbPath = await resolveThumbnailPath(article.thumbnail_local_path).catch(
+            (error) => {
+              console.warn("[Publish] thumbnail resolve failed", error);
+              return null;
+            }
+          );
+          if (absoluteThumbPath) {
+            await uploadArticlePhoto(context, idxno, absoluteThumbPath).catch((error) => {
+              console.warn("[Publish] photo upload failed", error);
+            });
+          }
+        }
+
+        failedStep = PUBLISH_FAILED_STEPS.verify;
         const publicUrl = getPublicArticleUrl(idxno);
         await page.goto(publicUrl, { waitUntil: "networkidle" });
         const publicText = await page.locator("body").innerText({ timeout: 10000 });

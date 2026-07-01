@@ -110,7 +110,7 @@ DELETED
 ## 8. d-maker.kr Publish Rules
 
 - d-maker.kr 발행은 DB 직접 insert나 내부 API 호출이 아니라 Playwright로 관리자 페이지에 로그인하여 업로드한다.
-- 관리자 로그인 URL: `http://www.d-maker.kr/admin/adminLoginForm.html`
+- 관리자 로그인 URL: `https://www.d-maker.kr/admin/adminLoginForm.html`
 - 기사/보도자료 작성 URL: `https://www.d-maker.kr/news/adminArticleWriteForm.html?mode=input`
 - 공개 URL 패턴: `https://www.d-maker.kr/news/articleView.html?idxno={idxno}`
 - 자동화 전용 관리자 계정을 사용한다.

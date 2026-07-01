@@ -14,6 +14,65 @@ const statusLabels: Record<string, string> = {
   DELETED: "비노출"
 };
 
+interface StatusStyle {
+  accent: string;
+  tint: string;
+  value: string;
+  badge: string;
+}
+
+const statusStyles: Record<string, StatusStyle> = {
+  DRAFT: {
+    accent: "border-t-amber-400",
+    tint: "from-amber-50",
+    value: "text-amber-600",
+    badge: "bg-amber-100 text-amber-700"
+  },
+  READY_TO_PUBLISH: {
+    accent: "border-t-sky-400",
+    tint: "from-sky-50",
+    value: "text-sky-600",
+    badge: "bg-sky-100 text-sky-700"
+  },
+  EMBARGOED: {
+    accent: "border-t-purple-400",
+    tint: "from-purple-50",
+    value: "text-purple-600",
+    badge: "bg-purple-100 text-purple-700"
+  },
+  PUBLISHING: {
+    accent: "border-t-indigo-400",
+    tint: "from-indigo-50",
+    value: "text-indigo-600",
+    badge: "bg-indigo-100 text-indigo-700"
+  },
+  PUBLISHED: {
+    accent: "border-t-emerald-400",
+    tint: "from-emerald-50",
+    value: "text-emerald-600",
+    badge: "bg-emerald-100 text-emerald-700"
+  },
+  FAILED: {
+    accent: "border-t-rose-400",
+    tint: "from-rose-50",
+    value: "text-rose-600",
+    badge: "bg-rose-100 text-rose-700"
+  },
+  DELETED: {
+    accent: "border-t-slate-400",
+    tint: "from-slate-100",
+    value: "text-slate-500",
+    badge: "bg-slate-200 text-slate-600"
+  }
+};
+
+const fallbackStatusStyle: StatusStyle = {
+  accent: "border-t-slate-300",
+  tint: "from-slate-50",
+  value: "text-ink-950",
+  badge: "bg-slate-100 text-ink-500"
+};
+
 async function getArticles() {
   try {
     const res = await fetch(`${API_BASE}/articles?limit=10`, {
@@ -51,9 +110,9 @@ export default async function HomePage(): Promise<JSX.Element> {
       <div className="grid min-h-screen grid-cols-1 lg:grid-cols-[264px_1fr]">
         <Sidebar active="대시보드" />
         <section className="px-5 py-6 sm:px-8 lg:px-10">
-          <header className="mb-7 flex flex-col gap-4 border-b border-line pb-6 sm:flex-row sm:items-center sm:justify-between">
+          <header className="mb-7 flex flex-col gap-4 rounded-xl bg-gradient-to-r from-[#0f5f9f] via-[#1876c9] to-[#3aa0e3] px-6 py-6 text-white shadow-panel sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <p className="text-sm font-medium text-ink-500">운영 대시보드</p>
+              <p className="text-sm font-medium text-white/80">운영 대시보드</p>
               <h2 className="mt-1 text-2xl font-bold sm:text-3xl">
                 수집, 검수, 발행 상태
               </h2>
@@ -61,7 +120,7 @@ export default async function HomePage(): Promise<JSX.Element> {
             <div className="flex flex-wrap gap-2">
               <Link
                 href="/drafts"
-                className="rounded-md border border-line bg-white px-4 py-2 text-sm font-semibold text-ink-700 shadow-sm hover:bg-slate-50"
+                className="rounded-md bg-white/15 px-4 py-2 text-sm font-semibold text-white ring-1 ring-white/40 backdrop-blur transition hover:bg-white/25"
               >
                 Draft 목록
               </Link>
@@ -70,29 +129,34 @@ export default async function HomePage(): Promise<JSX.Element> {
           </header>
 
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-            {Object.values(ARTICLE_STATUSES).map((status) => (
-              <article
-                className="rounded-lg border border-line bg-white p-5 shadow-panel"
-                key={status}
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="text-sm font-semibold text-ink-500">
-                      {statusLabels[status] ?? status}
-                    </p>
-                    <p className="mt-1 text-xs font-medium text-slate-400">
-                      {status}
-                    </p>
+            {Object.values(ARTICLE_STATUSES).map((status) => {
+              const style = statusStyles[status] ?? fallbackStatusStyle;
+              return (
+                <article
+                  className={`rounded-lg border border-line border-t-4 ${style.accent} bg-gradient-to-b ${style.tint} to-white p-5 shadow-panel transition hover:-translate-y-0.5 hover:shadow-md`}
+                  key={status}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-semibold text-ink-700">
+                        {statusLabels[status] ?? status}
+                      </p>
+                      <p className="mt-1 text-xs font-medium text-slate-400">
+                        {status}
+                      </p>
+                    </div>
+                    <span
+                      className={`rounded-full px-2.5 py-1 text-xs font-semibold ${style.badge}`}
+                    >
+                      {countsMap[status] ?? 0}건
+                    </span>
                   </div>
-                  <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-ink-500">
-                    {countsMap[status] ?? 0}건
-                  </span>
-                </div>
-                <strong className="mt-5 block text-3xl font-bold">
-                  {countsMap[status] ?? 0}
-                </strong>
-              </article>
-            ))}
+                  <strong className={`mt-5 block text-3xl font-bold ${style.value}`}>
+                    {countsMap[status] ?? 0}
+                  </strong>
+                </article>
+              );
+            })}
           </div>
 
           <div className="mt-7 grid gap-5 xl:grid-cols-[1.2fr_0.8fr]">
@@ -146,7 +210,11 @@ export default async function HomePage(): Promise<JSX.Element> {
                           </span>
                         </div>
                       </div>
-                      <span className="self-start rounded-full bg-slate-100 px-2.5 py-1 text-center text-xs font-semibold text-ink-700">
+                      <span
+                        className={`self-start rounded-full px-2.5 py-1 text-center text-xs font-semibold ${
+                          (statusStyles[article.status] ?? fallbackStatusStyle).badge
+                        }`}
+                      >
                         {statusLabels[article.status] ?? article.status}
                       </span>
                     </Link>
@@ -157,26 +225,28 @@ export default async function HomePage(): Promise<JSX.Element> {
 
             <section className="rounded-lg border border-line bg-white p-5 shadow-panel">
               <h3 className="text-base font-bold">운영 기준</h3>
-              <dl className="mt-4 grid gap-4">
-                <div>
-                  <dt className="text-xs font-semibold uppercase text-ink-500">
+              <dl className="mt-4 grid gap-3">
+                <div className="rounded-lg border-l-4 border-sky-400 bg-sky-50/60 px-4 py-3">
+                  <dt className="text-xs font-semibold uppercase text-sky-700">
                     NewsData.io
                   </dt>
-                  <dd className="mt-1 text-sm font-medium">기본 Draft 저장</dd>
+                  <dd className="mt-1 text-sm font-medium text-ink-700">
+                    기본 Draft 저장
+                  </dd>
                 </div>
-                <div>
-                  <dt className="text-xs font-semibold uppercase text-ink-500">
+                <div className="rounded-lg border-l-4 border-emerald-400 bg-emerald-50/60 px-4 py-3">
+                  <dt className="text-xs font-semibold uppercase text-emerald-700">
                     Newswire
                   </dt>
-                  <dd className="mt-1 text-sm font-medium">
+                  <dd className="mt-1 text-sm font-medium text-ink-700">
                     insert/update/delete action 처리
                   </dd>
                 </div>
-                <div>
-                  <dt className="text-xs font-semibold uppercase text-ink-500">
+                <div className="rounded-lg border-l-4 border-purple-400 bg-purple-50/60 px-4 py-3">
+                  <dt className="text-xs font-semibold uppercase text-purple-700">
                     Publisher
                   </dt>
-                  <dd className="mt-1 text-sm font-medium">
+                  <dd className="mt-1 text-sm font-medium text-ink-700">
                     Playwright worker에서만 실행
                   </dd>
                 </div>

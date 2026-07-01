@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { API_BASE } from "../../lib/api-base";
 
 export interface ReadyArticle {
@@ -40,6 +40,17 @@ const STATUS_LABELS: Record<string, string> = {
   CANCELED: "취소"
 };
 
+const STATUS_STYLES: Record<string, string> = {
+  PENDING: "bg-amber-100 text-amber-700",
+  RUNNING: "bg-blue-100 text-blue-700",
+  RETRYING: "bg-amber-100 text-amber-700",
+  SUCCEEDED: "bg-emerald-100 text-emerald-700",
+  FAILED: "bg-red-100 text-red-700",
+  CANCELED: "bg-slate-100 text-ink-700"
+};
+
+const ACTIVE_STATUSES = ["PENDING", "RUNNING", "RETRYING"];
+
 export function PublishRequestManager({
   readyArticles,
   publishJobs
@@ -48,6 +59,35 @@ export function PublishRequestManager({
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
   const [message, setMessage] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [jobs, setJobs] = useState<PublishJob[]>(publishJobs);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+
+  const hasActiveJobs = jobs.some((job) => ACTIVE_STATUSES.includes(job.status));
+
+  const refreshJobs = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_BASE}/publish-requests?limit=20`, {
+        cache: "no-store"
+      });
+      if (!res.ok) return;
+      const data = (await res.json()) as { items?: PublishJob[] };
+      if (Array.isArray(data.items)) {
+        setJobs(data.items);
+        setLastUpdated(new Date());
+      }
+    } catch {
+      // 폴링 중 일시적 오류는 무시하고 다음 주기에 재시도한다.
+    }
+  }, []);
+
+  // 진행 중인 작업이 있으면 3초, 없으면 20초 간격으로 상태를 모니터링한다.
+  useEffect(() => {
+    const delay = hasActiveJobs ? 3000 : 20000;
+    const timer = setInterval(() => {
+      void refreshJobs();
+    }, delay);
+    return () => clearInterval(timer);
+  }, [hasActiveJobs, refreshJobs]);
 
   const allSelected = useMemo(
     () =>
@@ -94,6 +134,7 @@ export function PublishRequestManager({
         `발행 요청 ${data.queued?.length ?? 0}건 등록, ${data.skipped?.length ?? 0}건 제외`
       );
       router.refresh();
+      void refreshJobs();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "발행 요청 실패");
     } finally {
@@ -185,27 +226,55 @@ export function PublishRequestManager({
       </section>
 
       <section className="rounded-lg border border-line bg-white shadow-panel">
-        <div className="border-b border-line p-5">
-          <h3 className="text-lg font-bold">최근 발행 요청</h3>
+        <div className="flex items-center justify-between gap-3 border-b border-line p-5">
+          <div className="flex items-center gap-2">
+            <h3 className="text-lg font-bold">발행 진행 상태</h3>
+            {hasActiveJobs ? (
+              <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2 py-0.5 text-xs font-semibold text-blue-700">
+                <span className="h-2 w-2 animate-pulse rounded-full bg-blue-500" />
+                모니터링 중
+              </span>
+            ) : null}
+          </div>
+          <div className="flex items-center gap-3 text-xs text-ink-500">
+            {lastUpdated ? (
+              <span>갱신 {lastUpdated.toLocaleTimeString("ko-KR")}</span>
+            ) : null}
+            <button
+              className="rounded-md border border-line px-2.5 py-1 font-semibold text-ink-700 hover:bg-slate-50"
+              onClick={() => void refreshJobs()}
+              type="button"
+            >
+              새로고침
+            </button>
+          </div>
         </div>
         <div className="divide-y divide-line">
-          {publishJobs.length === 0 ? (
+          {jobs.length === 0 ? (
             <div className="p-8 text-center text-sm text-ink-500">
               발행 요청 이력이 없습니다.
             </div>
           ) : (
-            publishJobs.map((job) => (
+            jobs.map((job) => (
               <div className="p-4" key={job.id}>
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <p className="truncate text-sm font-semibold">
+                    <Link
+                      className="truncate text-sm font-semibold text-[#0f5f9f] hover:underline"
+                      href={`/articles/${job.article_id}`}
+                    >
                       {job.article_title || `기사 #${job.article_id}`}
-                    </p>
+                    </Link>
                     <p className="mt-1 text-xs text-ink-500">
                       요청 #{job.id} · 기사 #{job.article_id}
+                      {job.retry_count > 0 ? ` · 재시도 ${job.retry_count}회` : ""}
                     </p>
                   </div>
-                  <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-ink-700">
+                  <span
+                    className={`whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-semibold ${
+                      STATUS_STYLES[job.status] ?? "bg-slate-100 text-ink-700"
+                    }`}
+                  >
                     {STATUS_LABELS[job.status] ?? job.status}
                   </span>
                 </div>
@@ -215,7 +284,7 @@ export function PublishRequestManager({
                   </p>
                 ) : null}
                 <p className="mt-2 text-xs text-ink-500">
-                  {new Date(job.created_at).toLocaleString("ko-KR")}
+                  {new Date(job.updated_at || job.created_at).toLocaleString("ko-KR")}
                 </p>
               </div>
             ))

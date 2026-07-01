@@ -95,7 +95,7 @@ const TAB_ACTIONS: Record<BoardTab, BulkAction[]> = {
     {
       kind: "translate",
       label: "본문 일괄 번역",
-      confirm: "선택한 기사의 본문 번역 작업을 등록할까요? DeepL 사용량이 차감됩니다."
+      confirm: "선택한 기사의 본문 번역 작업을 등록할까요? OpenAI 사용량이 차감됩니다."
     },
     {
       kind: "ready",

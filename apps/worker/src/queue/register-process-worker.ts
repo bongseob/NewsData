@@ -15,7 +15,7 @@ import { join, resolve } from "node:path";
 import { mkdir, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { crawlArticle } from "../crawl/crawl-article.js";
-import { translateToKorean } from "../translate/deepl.js";
+import { translateToKorean } from "../translate/openai.js";
 
 // ────────────────────────────────────────────────────────────────────
 // Helpers

@@ -68,8 +68,10 @@ function buildPrompt(input: {
 
   if (input.target === CONTENT_GENERATION_TARGETS.subtitle) {
     return [
-      "Generate exactly 3 concise Korean subtitle candidates for this news article.",
-      "Each candidate must be natural for a Korean news admin editor and under 90 Korean characters.",
+      "Summarize this news article as exactly 3 Korean sentences.",
+      "Each sentence must be a complete, factual sentence that captures a key point of the article.",
+      "Each sentence should read naturally in Korean and stay under 90 Korean characters.",
+      "Do not add bullet markers or numbering; return each sentence as a plain string in the suggestions array.",
       common
     ].join("\n");
   }
@@ -77,6 +79,7 @@ function buildPrompt(input: {
   return [
     "Generate exactly 3 Korean news keywords for this article.",
     "Each keyword must be a short noun phrase, not a sentence.",
+    'Write each keyword as a single token with no spaces; remove any internal spaces (e.g. "인공 지능" -> "인공지능").',
     common
   ].join("\n");
 }
@@ -161,9 +164,14 @@ export function registerContentWorker(
         body: article.translated_body || article.original_body || article.body
       });
       const suggestions = await generateSuggestions(prompt, 3);
+      // 키워드는 단어 내부 띄어쓰기를 제거해 붙여 쓴다.
+      const normalized =
+        target === CONTENT_GENERATION_TARGETS.keywords
+          ? suggestions.map((keyword) => keyword.replace(/\s+/g, ""))
+          : suggestions;
 
       console.log(`[Content] generated ${target} suggestions for article ${articleId}`);
-      return { articleId, target, suggestions };
+      return { articleId, target, suggestions: normalized };
     },
     { connection }
   );

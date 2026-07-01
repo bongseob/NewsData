@@ -6,7 +6,7 @@ import {
   type TranslateJobData
 } from "@newsdata/shared";
 import { ArticlesRepository, createMysqlPool } from "@newsdata/db";
-import { translateToKorean } from "../translate/deepl.js";
+import { translateToKorean } from "../translate/openai.js";
 
 const pool = createMysqlPool({
   host: process.env.MYSQL_HOST || "localhost",
@@ -43,7 +43,7 @@ export function registerTranslateWorker(
 
       const translatedBody = await translateToKorean(sourceBody);
       if (!translatedBody) {
-        throw new Error(`DeepL returned empty body for article: ${articleId}`);
+        throw new Error(`Translation returned empty body for article: ${articleId}`);
       }
 
       const attributedBody = appendTranslationAttribution(

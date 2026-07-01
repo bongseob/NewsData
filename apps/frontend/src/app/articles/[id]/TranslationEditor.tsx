@@ -38,6 +38,12 @@ export function TranslationEditor({
     setKeywords(initialKeywords.join(", "));
   }, [initialTitle, initialSubtitle, initialBody, initialKeywords]);
 
+  const subtitleSummaryText = subtitleSuggestions
+    .map((sentence) => `- ${sentence}`)
+    .join("\n");
+
+  const keywordSummaryText = keywordSuggestions.join(", ");
+
   const parseKeywords = (): string[] =>
     keywords
       .split(",")
@@ -221,10 +227,12 @@ export function TranslationEditor({
               복사
             </button>
           </span>
-          <input
+          <textarea
             value={subtitle}
             onChange={(e) => setSubtitle(e.target.value)}
-            className="rounded-md border border-line px-3 py-2 text-sm font-normal text-ink-900"
+            rows={3}
+            placeholder={"- 문장1\n- 문장2\n- 문장3"}
+            className="rounded-md border border-line px-3 py-2 text-sm font-normal leading-relaxed text-ink-900"
           />
         </label>
 
@@ -232,7 +240,7 @@ export function TranslationEditor({
           <div className="grid gap-2 rounded-md border border-dashed border-line p-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <span className="text-xs font-semibold text-ink-500">
-                번역 부제목 후보
+                부제목 3문장 요약
               </span>
               <button
                 type="button"
@@ -240,37 +248,30 @@ export function TranslationEditor({
                 disabled={generatingSubtitle}
                 className="rounded-md border border-line bg-white px-3 py-1 text-xs font-semibold text-ink-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
               >
-                {generatingSubtitle ? "생성 중..." : "부제목 3개 생성"}
+                {generatingSubtitle ? "생성 중..." : "3문장 생성"}
               </button>
             </div>
-            {subtitleSuggestions.length > 0 && (
-              <div className="grid gap-1">
-                {subtitleSuggestions.map((suggestion) => (
-                  <div
-                    key={suggestion}
-                    className="flex flex-wrap items-center justify-between gap-2 rounded-md bg-slate-50 px-3 py-2"
+            {subtitleSummaryText && (
+              <div className="grid gap-2">
+                <pre className="whitespace-pre-wrap rounded-md bg-slate-50 px-3 py-2 text-xs font-medium leading-relaxed text-ink-700">
+                  {subtitleSummaryText}
+                </pre>
+                <div className="flex flex-wrap gap-1">
+                  <button
+                    type="button"
+                    onClick={() => setSubtitle(subtitleSummaryText)}
+                    className={copyButtonClass}
                   >
-                    <span className="text-xs font-medium text-ink-700">
-                      {suggestion}
-                    </span>
-                    <span className="flex gap-1">
-                      <button
-                        type="button"
-                        onClick={() => setSubtitle(suggestion)}
-                        className={copyButtonClass}
-                      >
-                        적용
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => void copyText("부제목 후보를", suggestion)}
-                        className={copyButtonClass}
-                      >
-                        복사
-                      </button>
-                    </span>
-                  </div>
-                ))}
+                    적용
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void copyText("부제목 3문장을", subtitleSummaryText)}
+                    className={copyButtonClass}
+                  >
+                    전체 복사
+                  </button>
+                </div>
               </div>
             )}
           </div>
@@ -299,54 +300,38 @@ export function TranslationEditor({
           <div className="grid gap-2 rounded-md border border-dashed border-line p-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <span className="text-xs font-semibold text-ink-500">
-                키워드 후보
+                키워드 3개 (하나의 문자열)
               </span>
-              <div className="flex flex-wrap gap-1">
-                {keywordSuggestions.length > 0 && (
+              <button
+                type="button"
+                onClick={() => void generateContent("keywords")}
+                disabled={generatingKeywords}
+                className="rounded-md border border-line bg-white px-3 py-1 text-xs font-semibold text-ink-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {generatingKeywords ? "생성 중..." : "키워드 3개 생성"}
+              </button>
+            </div>
+            {keywordSummaryText && (
+              <div className="grid gap-2">
+                <pre className="whitespace-pre-wrap rounded-md bg-slate-50 px-3 py-2 text-xs font-medium leading-relaxed text-ink-700">
+                  {keywordSummaryText}
+                </pre>
+                <div className="flex flex-wrap gap-1">
                   <button
                     type="button"
-                    onClick={() =>
-                      void copyText("키워드 후보 전체를", keywordSuggestions.join(", "))
-                    }
+                    onClick={() => setKeywords(keywordSummaryText)}
                     className={copyButtonClass}
                   >
-                    후보 전체 복사
+                    적용
                   </button>
-                )}
-                <button
-                  type="button"
-                  onClick={() => void generateContent("keywords")}
-                  disabled={generatingKeywords}
-                  className="rounded-md border border-line bg-white px-3 py-1 text-xs font-semibold text-ink-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {generatingKeywords ? "생성 중..." : "키워드 3개 생성"}
-                </button>
-              </div>
-            </div>
-            {keywordSuggestions.length > 0 && (
-              <div className="flex flex-wrap gap-1">
-                {keywordSuggestions.map((suggestion) => (
-                  <span
-                    key={suggestion}
-                    className="inline-flex items-center gap-1 rounded-full bg-slate-50 px-2 py-1 text-xs font-medium text-ink-700"
+                  <button
+                    type="button"
+                    onClick={() => void copyText("키워드 전체를", keywordSummaryText)}
+                    className={copyButtonClass}
                   >
-                    {suggestion}
-                    <button
-                      type="button"
-                      onClick={() => setKeywords(suggestion)}
-                      className="rounded-full bg-white px-1.5 py-0.5 font-semibold hover:bg-blue-50"
-                    >
-                      적용
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => void copyText("키워드 후보를", suggestion)}
-                      className="rounded-full bg-white px-1.5 py-0.5 font-semibold hover:bg-blue-50"
-                    >
-                      복사
-                    </button>
-                  </span>
-                ))}
+                    전체 복사
+                  </button>
+                </div>
               </div>
             )}
           </div>
