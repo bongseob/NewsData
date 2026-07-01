@@ -82,7 +82,15 @@ function compactPayload(payload: unknown): string {
   return entries.length > 0 ? entries.join(", ") : "-";
 }
 
+type SourceTab = "newsdata" | "newswire";
+
+const SOURCE_TABS: { key: SourceTab; label: string; disabled?: boolean }[] = [
+  { key: "newsdata", label: "NewsData.io" },
+  { key: "newswire", label: "뉴스와이어", disabled: true }
+];
+
 export function ManualFetchManager(): JSX.Element {
+  const [activeSource, setActiveSource] = useState<SourceTab>("newsdata");
   const [q, setQ] = useState("");
   const [categories, setCategories] = useState<NewsDataCategory[]>([]);
   const [countries, setCountries] = useState<NewsDataCountry[]>(["kr"]);
@@ -105,8 +113,10 @@ export function ManualFetchManager(): JSX.Element {
   const countryString = useMemo(() => joinSelectedValues(countries), [countries]);
   const languageString = useMemo(() => joinSelectedValues(languages), [languages]);
 
+  const sourceParam = activeSource === "newsdata" ? "NEWSDATA" : "NEWSWIRE";
+
   const loadJobs = useCallback(async () => {
-    const res = await fetch(`${API_BASE}/jobs/fetch?source=NEWSDATA&limit=10`, {
+    const res = await fetch(`${API_BASE}/jobs/fetch?source=${sourceParam}&limit=10`, {
       cache: "no-store"
     });
     if (!res.ok) return;
@@ -114,7 +124,7 @@ export function ManualFetchManager(): JSX.Element {
     const data = (await res.json()) as FetchJobsResponse;
     setJobs(data.items ?? []);
     setTotal(data.total ?? 0);
-  }, []);
+  }, [sourceParam]);
 
   useEffect(() => {
     void loadJobs();
@@ -264,8 +274,35 @@ export function ManualFetchManager(): JSX.Element {
   };
 
   return (
-    <div className="grid gap-6 xl:grid-cols-[520px_1fr]">
-      <form
+    <div className="space-y-5">
+      <div className="flex flex-wrap gap-2">
+        {SOURCE_TABS.map((tab) => (
+          <button
+            key={tab.key}
+            type="button"
+            disabled={tab.disabled}
+            onClick={() => setActiveSource(tab.key)}
+            className={`flex items-center gap-2 rounded-md px-4 py-2 text-sm font-semibold transition ${
+              tab.key === activeSource
+                ? "bg-[#1167b1] text-white"
+                : tab.disabled
+                  ? "cursor-not-allowed border border-line bg-slate-50 text-ink-300"
+                  : "border border-line bg-white text-ink-700 hover:bg-slate-50"
+            }`}
+          >
+            {tab.label}
+            {tab.disabled && (
+              <span className="rounded-full bg-ink-200 px-2 py-0.5 text-[10px] font-bold text-ink-500">
+                준비 중
+              </span>
+            )}
+          </button>
+        ))}
+      </div>
+
+      {activeSource === "newsdata" ? (
+        <div className="grid gap-6 xl:grid-cols-[520px_1fr]">
+          <form
         onSubmit={submit}
         className="rounded-lg border border-line bg-white p-6 shadow-panel"
       >
@@ -624,6 +661,8 @@ export function ManualFetchManager(): JSX.Element {
           </div>
         )}
       </section>
+        </div>
+      ) : null}
     </div>
   );
 }
