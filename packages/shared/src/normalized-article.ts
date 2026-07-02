@@ -32,6 +32,8 @@ export interface NormalizedArticle {
   imageUrl: string | null;
   keywords: string[] | null;
   licensePolicy: LicensePolicy;
+  /** 원문 크롤 시 사용할 User-Agent(예: SEC는 연락처 UA 필요). null이면 기본 UA. */
+  crawlUserAgent: string | null;
   rawPayload: unknown;
 }
 

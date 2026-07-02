@@ -110,6 +110,7 @@ function normalizeArticle(article: NewsDataArticle): NormalizedArticle | null {
     imageUrl: article.image_url ?? null,
     keywords,
     licensePolicy: "LICENSED",
+    crawlUserAgent: null,
     rawPayload: article
   };
 }

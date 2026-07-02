@@ -71,7 +71,9 @@ export function registerProcessWorker(
       let body: string | null = article.body;
       if (!body && sourceUrl) {
         console.log(`[Process] Crawling original article: ${sourceUrl}`);
-        const crawled = await crawlArticle(sourceUrl);
+        const crawled = await crawlArticle(sourceUrl, {
+          userAgent: article.crawlUserAgent ?? undefined
+        });
         if (crawled?.content) {
           body = crawled.content;
           console.log(

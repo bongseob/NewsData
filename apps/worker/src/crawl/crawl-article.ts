@@ -11,10 +11,22 @@ export interface CrawlResult {
   sourceUrl: string;
 }
 
+const DEFAULT_CRAWL_UA =
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) " +
+  "AppleWebKit/537.36 (KHTML, like Gecko) " +
+  "Chrome/126.0.0.0 Safari/537.36";
+
+export interface CrawlOptions {
+  /** 소스별 크롤 User-Agent(예: SEC는 연락처 포함 UA 요구). 미지정 시 일반 브라우저 UA. */
+  userAgent?: string | null;
+  timeoutMs?: number;
+}
+
 export async function crawlArticle(
   url: string,
-  timeoutMs = 15000
+  options: CrawlOptions = {}
 ): Promise<CrawlResult | null> {
+  const { userAgent, timeoutMs = 15000 } = options;
   try {
     const response = await axios.get(url, {
       timeout: timeoutMs,
@@ -22,10 +34,7 @@ export async function crawlArticle(
       headers: {
         Accept: "text/html,application/xhtml+xml",
         "Accept-Language": "en-US,en;q=0.9",
-        "User-Agent":
-          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) " +
-          "AppleWebKit/537.36 (KHTML, like Gecko) " +
-          "Chrome/126.0.0.0 Safari/537.36"
+        "User-Agent": userAgent || DEFAULT_CRAWL_UA
       },
       validateStatus: (status) => status >= 200 && status < 400
     });

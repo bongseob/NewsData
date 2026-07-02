@@ -76,6 +76,8 @@ function mapItem(item: RssItem, opts: RssFetchOptions): NormalizedArticle | null
     imageUrl: extractImageUrl(item),
     keywords: extractKeywords(item),
     licensePolicy: opts.licensePolicy,
+    // 피드 소스는 원문 크롤에도 동일 User-Agent를 쓴다(SEC 등 UA 게이팅 대응).
+    crawlUserAgent: opts.userAgent,
     rawPayload: item
   };
 }
