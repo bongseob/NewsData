@@ -57,7 +57,10 @@ interface ArticleBoardProps {
 const SOURCE_LABELS: Record<string, string> = {
   NEWSDATA: "NewsData.io",
   SEC: "SEC",
-  FED: "Federal Reserve"
+  FED: "Federal Reserve",
+  GDELT: "GDELT",
+  REUTERS: "Reuters",
+  GUARDIAN: "The Guardian"
 };
 
 const SOURCE_OPTIONS = [

@@ -3,6 +3,8 @@ import type { SourceAdapter } from "./types.js";
 import { newsDataAdapter } from "./newsdata.js";
 import { secAdapter } from "./sec.js";
 import { fedAdapter } from "./fed.js";
+import { gdeltAdapter, reutersAdapter } from "./gdelt.js";
+import { guardianAdapter } from "./guardian.js";
 
 /**
  * 소스 → 수집 어댑터 레지스트리. 새 소스는 여기 등록만 하면 fetch/process
@@ -11,7 +13,10 @@ import { fedAdapter } from "./fed.js";
 export const SOURCE_ADAPTERS: Partial<Record<ArticleSource, SourceAdapter>> = {
   [newsDataAdapter.source]: newsDataAdapter,
   [secAdapter.source]: secAdapter,
-  [fedAdapter.source]: fedAdapter
+  [fedAdapter.source]: fedAdapter,
+  [gdeltAdapter.source]: gdeltAdapter,
+  [reutersAdapter.source]: reutersAdapter,
+  [guardianAdapter.source]: guardianAdapter
 };
 
 export function getSourceAdapter(source: ArticleSource): SourceAdapter {

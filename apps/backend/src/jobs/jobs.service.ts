@@ -46,11 +46,14 @@ export interface CreateFetchJobResult {
   query: Record<string, unknown>;
 }
 
-// 수동 수집을 지원하는 소스. 피드 소스(SEC/Fed)는 NewsData 쿼리 정규화를 적용하지 않는다.
+// 수동 수집을 지원하는 소스. NewsData 외 소스는 NewsData 쿼리 정규화를 적용하지 않는다.
 const MANUAL_FETCH_SOURCES: ReadonlySet<string> = new Set<string>([
   ARTICLE_SOURCES.newsdata,
   ARTICLE_SOURCES.sec,
-  ARTICLE_SOURCES.fed
+  ARTICLE_SOURCES.fed,
+  ARTICLE_SOURCES.gdelt,
+  ARTICLE_SOURCES.reuters,
+  ARTICLE_SOURCES.guardian
 ]);
 
 export interface CancelFetchJobResult {

@@ -84,19 +84,27 @@ function compactPayload(payload: unknown): string {
   return entries.length > 0 ? entries.join(", ") : "-";
 }
 
-type SourceTab = "newsdata" | "sec" | "fed";
+type SourceTab = "newsdata" | "sec" | "fed" | "gdelt" | "reuters" | "guardian";
 
 const SOURCE_TABS: { key: SourceTab; label: string; disabled?: boolean }[] = [
   { key: "newsdata", label: "NewsData.io" },
   { key: "sec", label: "SEC" },
-  { key: "fed", label: "Federal Reserve" }
+  { key: "fed", label: "Federal Reserve" },
+  { key: "gdelt", label: "GDELT" },
+  { key: "reuters", label: "Reuters" },
+  { key: "guardian", label: "The Guardian" }
 ];
 
 const SOURCE_PARAM_BY_TAB: Record<SourceTab, string> = {
   newsdata: "NEWSDATA",
   sec: "SEC",
-  fed: "FED"
+  fed: "FED",
+  gdelt: "GDELT",
+  reuters: "REUTERS",
+  guardian: "GUARDIAN"
 };
+
+const FEED_SOURCES: SourceTab[] = ["sec", "fed"];
 
 interface FetchPreset {
   id: number;
@@ -135,6 +143,10 @@ export function ManualFetchManager(): JSX.Element {
   const [savingPreset, setSavingPreset] = useState(false);
   const [presetsLoading, setPresetsLoading] = useState(false);
   const [presetsError, setPresetsError] = useState(false);
+
+  // 키워드 검색 소스(GDELT/Reuters/Guardian)용 상태
+  const [keywordQ, setKeywordQ] = useState("");
+  const [keywordCount, setKeywordCount] = useState("50");
 
   // 수정 모드 관련 React 상태 추가
   const [editingJobId, setEditingJobId] = useState<number | null>(null);
@@ -552,6 +564,46 @@ export function ManualFetchManager(): JSX.Element {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ source: sourceParam, query: {} })
+      });
+      if (!res.ok) {
+        const errorText = await res.text();
+        setMessage(`수집 요청 실패: ${errorText}`);
+        return;
+      }
+      const data = await res.json();
+      setMessage(`수집 작업 #${data.fetchJobId} 등록 완료`);
+      await loadJobs();
+    } catch {
+      setMessage("서버 연결 중 오류가 발생했습니다.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  // 키워드 검색 소스(GDELT/Reuters/Guardian) 수집 요청
+  const submitKeywordFetch = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setSubmitting(true);
+    setMessage(null);
+
+    const query: Record<string, unknown> = {};
+    const q = keywordQ.trim();
+    if (q) query.q = q;
+    const count = Number(keywordCount) || 50;
+    if (activeSource === "guardian") query.pageSize = count;
+    else query.maxrecords = count;
+
+    if (!q && activeSource !== "reuters") {
+      setMessage("검색어를 입력해 주세요.");
+      setSubmitting(false);
+      return;
+    }
+
+    try {
+      const res = await fetch(`${API_BASE}/jobs/fetch`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ source: sourceParam, query })
       });
       if (!res.ok) {
         const errorText = await res.text();
@@ -1076,7 +1128,7 @@ export function ManualFetchManager(): JSX.Element {
           </button>
         )}
       </form>
-        ) : (
+        ) : FEED_SOURCES.includes(activeSource) ? (
           <form
             onSubmit={submitFeedFetch}
             className="rounded-lg border border-line bg-white p-6 shadow-panel"
@@ -1090,6 +1142,57 @@ export function ManualFetchManager(): JSX.Element {
               설정된 공식 RSS 피드에서 최신 보도자료를 수집합니다. 미국 정부 자료(퍼블릭
               도메인)로 전문 번역 발행이 가능합니다.
             </p>
+            {message && (
+              <p className="mt-4 rounded-md bg-slate-50 px-3 py-2 text-sm text-ink-700">
+                {message}
+              </p>
+            )}
+            <button
+              type="submit"
+              disabled={submitting}
+              className="mt-5 w-full rounded-md bg-[#1167b1] px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-[#0e5a9b] disabled:opacity-50"
+            >
+              {submitting ? "수집 요청 중..." : "수집 작업 등록"}
+            </button>
+          </form>
+        ) : (
+          <form
+            onSubmit={submitKeywordFetch}
+            className="rounded-lg border border-line bg-white p-6 shadow-panel"
+          >
+            <h3 className="text-base font-bold">
+              {SOURCE_TABS.find((t) => t.key === activeSource)?.label} 키워드 수집
+            </h3>
+            <p className="mt-3 text-sm text-ink-500">
+              {activeSource === "reuters"
+                ? "GDELT를 통해 Reuters(reuters.com) 기사를 검색해 수집합니다. 검색어는 선택입니다."
+                : activeSource === "gdelt"
+                  ? "GDELT 글로벌 뉴스 색인에서 키워드로 최신 기사를 검색해 수집합니다."
+                  : "The Guardian Open Platform에서 키워드로 기사를 검색해 수집합니다(본문 제공)."}
+              {activeSource === "guardian" && " GUARDIAN_API_KEY 필요."}
+            </p>
+            <label className="mt-5 grid gap-1 text-sm">
+              <span className="font-semibold text-ink-700">
+                검색어 q{activeSource === "reuters" ? " (선택)" : ""}
+              </span>
+              <input
+                value={keywordQ}
+                onChange={(event) => setKeywordQ(event.target.value)}
+                className="rounded-md border border-line px-3 py-2"
+                placeholder="예: artificial intelligence, tariffs"
+              />
+            </label>
+            <label className="mt-4 grid gap-1 text-sm">
+              <span className="font-semibold text-ink-700">수집 건수</span>
+              <input
+                type="number"
+                min={1}
+                max={activeSource === "guardian" ? 200 : 250}
+                value={keywordCount}
+                onChange={(event) => setKeywordCount(event.target.value)}
+                className="rounded-md border border-line px-3 py-2"
+              />
+            </label>
             {message && (
               <p className="mt-4 rounded-md bg-slate-50 px-3 py-2 text-sm text-ink-700">
                 {message}
