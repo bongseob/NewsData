@@ -1,8 +1,8 @@
 import { Worker, type ConnectionOptions } from "bullmq";
 import {
   QUEUE_NAMES,
-  ARTICLE_SOURCES,
-  ARTICLE_STATUSES
+  ARTICLE_STATUSES,
+  type ProcessArticleJobData
 } from "@newsdata/shared";
 import {
   createMysqlPool,
@@ -16,23 +16,6 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { crawlArticle } from "../crawl/crawl-article.js";
 import { translateToKorean } from "../translate/openai.js";
-
-// ────────────────────────────────────────────────────────────────────
-// Helpers
-// ────────────────────────────────────────────────────────────────────
-
-const PAID_PLAN_MARKERS = [
-  "ONLY AVAILABLE IN PAID",
-  "ONLY AVAILABLE IN PROFESSIONAL",
-  "ONLY AVAILABLE IN CORPORATE"
-];
-
-function filterPaidPlanPlaceholder(value: string | null): string | null {
-  if (!value) return null;
-  return PAID_PLAN_MARKERS.some((m) => value.toUpperCase().includes(m))
-    ? null
-    : value;
-}
 
 // ────────────────────────────────────────────────────────────────────
 // DB pool
@@ -72,41 +55,21 @@ export function registerProcessWorker(
     QUEUE_NAMES.process,
     async (job) => {
       console.log(`[Process] job accepted: ${job.id}`);
-      const { source, articleData, fetchJobId } = job.data;
+      const { article, fetchJobId } = job.data as ProcessArticleJobData;
 
-      if (source !== ARTICLE_SOURCES.newsdata) {
-        console.log(`[Process] Ignored source: ${source}`);
-        return;
-      }
+      const externalId = article.externalId;
+      const title = article.title;
+      const subtitle = article.summary;
+      const publisherCredit = article.publisher || "출처 미상";
+      const sourceUrl = article.url || null;
+      const pressTime = article.pressTime ? new Date(article.pressTime) : null;
+      const imageUrl = article.imageUrl;
+      const keywords = article.keywords;
+      const country = article.country ? article.country.substring(0, 255) : null;
 
-      const externalId = articleData.article_id;
-      const title = articleData.title;
-      const subtitle = articleData.description || null;
-      const publisherCredit = articleData.source_id || "NewsData.io";
-      const sourceUrl = articleData.link || null;
-      const pressTime = articleData.pubDate
-        ? new Date(articleData.pubDate)
-        : null;
-      const imageUrl = articleData.image_url;
-      const keywords = Array.isArray(articleData.keywords)
-        ? articleData.keywords
-            .map((keyword: unknown) => String(keyword).trim())
-            .filter((keyword: string) => keyword.length > 0)
-            .slice(0, 20)
-        : null;
-      // NewsData.io country는 전체 국가명 배열(예: ["south korea"])이다.
-      const countryRaw = Array.isArray(articleData.country)
-        ? articleData.country.join(",") || null
-        : articleData.country || null;
-      const country = countryRaw ? countryRaw.substring(0, 255) : null;
-
-      // 1. Determine body text
-      //    - NewsData.io free tier returns "ONLY AVAILABLE IN PAID PLANS"
-      //      for the content field. In that case, crawl the original article.
-      const apiContent = filterPaidPlanPlaceholder(articleData.content);
-      let body: string | null = apiContent || subtitle;
-
-      if (!apiContent && sourceUrl) {
+      // 1. 본문 확보: 소스가 본문을 제공하면 사용, 없으면 원문 크롤, 최종 fallback은 요약.
+      let body: string | null = article.body;
+      if (!body && sourceUrl) {
         console.log(`[Process] Crawling original article: ${sourceUrl}`);
         const crawled = await crawlArticle(sourceUrl);
         if (crawled?.content) {
@@ -115,11 +78,10 @@ export function registerProcessWorker(
             `[Process] Crawled ${crawled.length} chars from ${sourceUrl}`
           );
         } else {
-          console.warn(
-            `[Process] Crawl failed, falling back to description`
-          );
+          console.warn(`[Process] Crawl failed, falling back to summary`);
         }
       }
+      if (!body) body = subtitle;
 
       // 2. Translate title only. Body translation is triggered manually from admin UI.
       console.log(`[Process] Translating title only for article ${externalId}...`);
@@ -130,7 +92,7 @@ export function registerProcessWorker(
 
       // 3. Upsert Article (DRAFT)
       const articleId = await articlesRepo.upsertCollectedArticle({
-        source: ARTICLE_SOURCES.newsdata,
+        source: article.source,
         externalId,
         status: ARTICLE_STATUSES.draft,
         title: storedTitle.substring(0, 500),
@@ -151,7 +113,7 @@ export function registerProcessWorker(
         country,
         sourceUrl,
         pressTime,
-        rawPayload: articleData,
+        rawPayload: article.rawPayload,
         fetchJobId: fetchJobId ?? null
       });
 

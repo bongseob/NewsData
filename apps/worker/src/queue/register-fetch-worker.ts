@@ -1,12 +1,9 @@
 import { Queue, Worker, type ConnectionOptions } from "bullmq";
-import axios from "axios";
 import {
-  ARTICLE_SOURCES,
   JOB_STATUSES,
   QUEUE_NAMES,
   type FetchJobData,
-  type NewsDataFetchQuery,
-  type NewsDataResponse
+  type ProcessArticleJobData
 } from "@newsdata/shared";
 import {
   ArticlesRepository,
@@ -14,8 +11,7 @@ import {
   FetchJobsRepository,
   type MysqlPool
 } from "@newsdata/db";
-
-const MAX_PAGES = 5;
+import { getSourceAdapter } from "../sources/registry.js";
 
 const pool: MysqlPool = createMysqlPool({
   host: process.env.MYSQL_HOST || "localhost",
@@ -28,61 +24,6 @@ const pool: MysqlPool = createMysqlPool({
 const fetchJobsRepo = new FetchJobsRepository(pool);
 const articlesRepo = new ArticlesRepository(pool);
 
-function buildNewsDataUrl(
-  apiKey: string,
-  query: NewsDataFetchQuery,
-  nextPage?: string
-): string {
-  const endpoint = query.from_date || query.to_date ? "archive" : "news";
-  const params = new URLSearchParams();
-  params.set("apikey", apiKey);
-
-  if (nextPage) {
-    params.set("page", nextPage);
-  } else {
-    if (query.q) params.set("q", query.q);
-    if (query.category) params.set("category", query.category);
-    if (query.country) params.set("country", query.country);
-    if (query.language) params.set("language", query.language);
-    if (query.from_date) params.set("from_date", query.from_date);
-    if (query.to_date) params.set("to_date", query.to_date);
-    if (query.domain) params.set("domain", query.domain);
-    if (query.domainurl) params.set("domainurl", query.domainurl);
-    if (query.prioritydomain) params.set("prioritydomain", query.prioritydomain);
-    if (query.removeduplicate !== undefined) {
-      params.set("removeduplicate", String(query.removeduplicate));
-    }
-    if (query.size) params.set("size", String(query.size));
-  }
-
-  return `https://newsdata.io/api/1/${endpoint}?${params.toString()}`;
-}
-
-function redactApiKey(url: string): string {
-  const parsed = new URL(url);
-  if (parsed.searchParams.has("apikey")) {
-    parsed.searchParams.set("apikey", "[redacted]");
-  }
-  return parsed.toString();
-}
-
-function formatNewsDataRequestError(error: unknown): string {
-  if (!axios.isAxiosError(error)) {
-    return error instanceof Error ? error.message : "Unknown NewsData.io request error";
-  }
-
-  const status = error.response?.status;
-  const data = error.response?.data;
-  const body =
-    typeof data === "string"
-      ? data
-      : data
-        ? JSON.stringify(data)
-        : "";
-  const statusText = status ? `HTTP ${status}` : "request failed";
-  return body ? `NewsData.io ${statusText}: ${body}` : `NewsData.io ${statusText}: ${error.message}`;
-}
-
 export function registerFetchWorker(connection: ConnectionOptions): Worker {
   const processQueue = new Queue(QUEUE_NAMES.process, { connection });
 
@@ -91,105 +32,51 @@ export function registerFetchWorker(connection: ConnectionOptions): Worker {
     async (job) => {
       const { fetchJobId, source, query } = job.data as FetchJobData;
 
-      if (source !== ARTICLE_SOURCES.newsdata) {
-        throw new Error(`Unsupported source for this worker: ${source}`);
-      }
+      const adapter = getSourceAdapter(source);
 
       const fetchJob = await fetchJobsRepo.findById(fetchJobId);
       if (fetchJob?.status === JOB_STATUSES.canceled) {
         console.log(`[Fetch] Job ${job.id} skipped canceled fetchJobId=${fetchJobId}`);
-        return {
-          skipped: true,
-          reason: "canceled"
-        };
+        return { skipped: true, reason: "canceled" };
       }
 
-      const apiKey = process.env.NEWSDATA_API_KEY;
-      if (!apiKey) {
-        throw new Error("NEWSDATA_API_KEY is not set");
-      }
-
-      console.log(`[Fetch] Job ${job.id} started fetchJobId=${fetchJobId}`);
+      console.log(`[Fetch] Job ${job.id} started source=${source} fetchJobId=${fetchJobId}`);
       await fetchJobsRepo.updateStatus(fetchJobId, JOB_STATUSES.running);
 
-      const fetchQuery = query as NewsDataFetchQuery;
-      let nextPage: string | undefined;
-      let pageNum = 0;
-      let pagesFetched = 0;
-      let totalCollected = 0;
+      const articles = await adapter.fetch({ query: query as Record<string, unknown> });
+
       let totalDuplicates = 0;
       let totalQueued = 0;
 
-      while (pageNum < MAX_PAGES) {
-        const url = buildNewsDataUrl(apiKey, fetchQuery, nextPage);
-        console.log(`[Fetch] Page ${pageNum + 1} GET ${redactApiKey(url)}`);
+      for (const article of articles) {
+        const existing = await articlesRepo.findBySourceExternalId(
+          article.source,
+          article.externalId
+        );
+        if (existing) {
+          totalDuplicates++;
+        }
 
-        const response = await axios.get<NewsDataResponse>(url, {
-          timeout: 15000,
-          validateStatus: (status) => status >= 200 && status < 300
-        }).catch((error: unknown) => {
-          throw new Error(formatNewsDataRequestError(error));
+        const jobData: ProcessArticleJobData = { article, fetchJobId };
+        await processQueue.add("process-article", jobData, {
+          jobId: `${source}-${fetchJobId}-${article.externalId}`,
+          removeOnComplete: 100,
+          removeOnFail: 200
         });
-
-        const data = response.data;
-        if (data.status && data.status !== "success") {
-          throw new Error(`NewsData.io API returned status: ${data.status}`);
-        }
-
-        pagesFetched++;
-        const articles = data.results ?? [];
-        if (articles.length === 0) {
-          console.log(`[Fetch] No more results on page ${pageNum + 1}.`);
-          break;
-        }
-
-        for (const article of articles) {
-          if (!article.article_id) {
-            console.warn("[Fetch] Skipping NewsData.io article without article_id.");
-            continue;
-          }
-
-          const existing = await articlesRepo.findBySourceExternalId(
-            ARTICLE_SOURCES.newsdata,
-            article.article_id
-          );
-          if (existing) {
-            totalDuplicates++;
-          }
-
-          await processQueue.add(
-            "process-article",
-            {
-              source: ARTICLE_SOURCES.newsdata,
-              articleData: article,
-              fetchJobId
-            },
-            {
-              jobId: `newsdata-${fetchJobId}-${article.article_id}`,
-              removeOnComplete: 100,
-              removeOnFail: 200
-            }
-          );
-          totalCollected++;
-          totalQueued++;
-        }
-
-        nextPage = data.nextPage ?? undefined;
-        if (!nextPage) {
-          console.log("[Fetch] No nextPage token. Pagination complete.");
-          break;
-        }
-
-        pageNum++;
+        totalQueued++;
       }
 
       console.log(
-        `[Fetch] Job ${job.id} done collected=${totalCollected}, queued=${totalQueued}, existing=${totalDuplicates}, pages=${pagesFetched}`
+        `[Fetch] Job ${job.id} done collected=${articles.length}, queued=${totalQueued}, existing=${totalDuplicates}`
       );
 
       await fetchJobsRepo.updateStatus(fetchJobId, JOB_STATUSES.succeeded);
 
-      return { totalCollected, totalQueued, totalDuplicates, pages: pagesFetched };
+      return {
+        totalCollected: articles.length,
+        totalQueued,
+        totalDuplicates
+      };
     },
     {
       connection,
