@@ -58,8 +58,10 @@ export function registerFetchWorker(connection: ConnectionOptions): Worker {
         }
 
         const jobData: ProcessArticleJobData = { article, fetchJobId };
+        // BullMQ 커스텀 잡 ID는 ':'를 포함할 수 없다(예: RSS guid가 URL인 경우).
+        const safeExternalId = article.externalId.replace(/[^A-Za-z0-9_-]/g, "_");
         await processQueue.add("process-article", jobData, {
-          jobId: `${source}-${fetchJobId}-${article.externalId}`,
+          jobId: `${source}-${fetchJobId}-${safeExternalId}`,
           removeOnComplete: 100,
           removeOnFail: 200
         });

@@ -20,7 +20,6 @@ export interface RssFetchOptions {
 }
 
 type RssItem = Parser.Item & {
-  "content:encoded"?: string;
   category?: string | string[];
 };
 
@@ -55,18 +54,14 @@ function mapItem(item: RssItem, opts: RssFetchOptions): NormalizedArticle | null
   const title = item.title?.trim();
   if (!externalId || !title) return null;
 
-  // content:encoded > content > null. RSS 요약은 summary로 별도 보관.
-  const fullContent =
-    (typeof item["content:encoded"] === "string" && item["content:encoded"]) ||
-    (typeof item.content === "string" && item.content) ||
-    null;
-
+  // RSS는 description(요약)만 주는 경우가 대부분이므로 body는 비워 두고
+  // process 워커가 원문을 크롤해 전문을 확보하게 한다. 요약은 summary로 보관.
   return {
     source: opts.source,
     externalId,
     title,
     summary: item.contentSnippet?.trim() ?? null,
-    body: fullContent,
+    body: null,
     url,
     canonicalUrl: canonicalizeUrl(url),
     publisher: opts.publisher,
