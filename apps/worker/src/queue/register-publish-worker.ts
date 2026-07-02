@@ -41,23 +41,43 @@ function isDryRun(): boolean {
   return process.env.PUBLISH_DRY_RUN !== "0";
 }
 
+const PUBLIC_DOMAIN = "PUBLIC_DOMAIN";
+
+// 저작권 안전 기본값: 명시적으로 PUBLIC_DOMAIN이 아니면 LICENSED로 취급한다.
+// (정책 미지정 레거시 기사도 전문 재배포되지 않게 보수적으로 처리)
+function isPublicDomain(article: ArticleRow): boolean {
+  return article.license_policy === PUBLIC_DOMAIN;
+}
+
+function buildSourceLink(article: ArticleRow): string {
+  return article.source_url ? `\n\n▶ 원문 보기: ${article.source_url}` : "";
+}
+
 function getArticleTitle(article: ArticleRow): string {
   return article.translated_title || article.title;
 }
 
 function getArticleSubtitle(article: ArticleRow): string | null {
-  if (article.translated_summary) {
-    return article.translated_summary;
+  if (isPublicDomain(article)) {
+    return article.translated_summary || article.translated_subtitle || null;
   }
-  if (article.translated_subtitle) {
-    return article.translated_subtitle;
-  }
-  // 모든 소스가 해외 뉴스이므로 외국어 원문 부제목은 발행하지 않는다.
-  return null;
+  // LICENSED: 요약은 본문에 사용하므로 부제목은 번역 부제만(없으면 비움).
+  return article.translated_subtitle || null;
 }
 
 function getArticleBody(article: ArticleRow): string | null {
-  return article.translated_body || article.original_body || article.body;
+  // PUBLIC_DOMAIN(SEC/Fed 등 미 정부): 전문 번역 발행.
+  if (isPublicDomain(article)) {
+    return article.translated_body || article.original_body || article.body;
+  }
+  // LICENSED(저작권 소스·정책 미지정): 전문 재배포 금지 → AI 요약 + 원문 링크만.
+  const summary = article.translated_summary || article.translated_subtitle;
+  if (!summary) {
+    throw new Error(
+      "LICENSED 기사에 요약(translated_summary)이 없어 발행할 수 없습니다. 본문 번역·요약을 먼저 생성하세요."
+    );
+  }
+  return summary + buildSourceLink(article);
 }
 
 function getArticleKeywords(article: ArticleRow): string[] {

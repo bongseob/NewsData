@@ -142,8 +142,9 @@
 - [x] `sources/guardian.ts`(무료 키 `GUARDIAN_API_KEY`, `show-fields=body` 본문 수신, HTML 태그 제거)
 - [x] `ARTICLE_SOURCES`에 `gdelt`/`reuters`/`guardian` 추가, 레지스트리·백엔드 소스셋·큐레이션 필터 라벨 반영
 - [x] 수동 수집 키워드 검색 패널(GDELT/Reuters/Guardian 탭, q + 건수)
-- [~] GDELT 라이브 검증: 어댑터는 완성/타입통과. 단, 테스트 IP가 GDELT 레이트리밋(5초당 1요청 초과)에 걸려 실수집 확인 보류. 어댑터가 429/비JSON 응답을 명확한 에러로 처리함. Guardian은 키 필요로 코드만.
-- [ ] `license_policy = LICENSED` → **요약+링크 발행 모드** 구현·검증 (남은 Phase 3 항목, LICENSED 본문 형식 확정 필요)
+- [x] Guardian 라이브 검증 완료(전문 본문 직접 수신, license_policy=LICENSED)
+- [~] GDELT/Reuters 라이브 검증: 어댑터 완성/타입통과. 테스트 IP가 GDELT 레이트리밋(5초당 1요청)에 걸려 실수집만 보류(429/비JSON 응답은 명확한 에러 처리).
+- [x] **발행 정책 분기** 구현·검증: `PUBLIC_DOMAIN`→전문, `LICENSED`(및 정책 미지정)→**AI 3문장 요약 + "▶ 원문 보기" 링크**. 요약 없으면 발행 차단(전문 유출 방지).
 
 ### Phase 4 — 방송사 RSS
 - [ ] `sources/bbc.ts`, `sources/npr.ts`
