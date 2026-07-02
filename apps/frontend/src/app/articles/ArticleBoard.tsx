@@ -55,8 +55,7 @@ interface ArticleBoardProps {
 
 const SOURCE_OPTIONS = [
   { value: "", label: "전체 출처" },
-  { value: "NEWSDATA", label: "NewsData.io" },
-  { value: "NEWSWIRE", label: "뉴스와이어" }
+  { value: "NEWSDATA", label: "NewsData.io" }
 ];
 
 const SORT_OPTIONS: { value: BoardSortColumn; label: string }[] = [

@@ -119,10 +119,11 @@
 - [ ] NewsData 수집 파리티 검증(기존과 동일 결과)
 
 ### Phase 1 — 뉴스와이어 제거
-- [ ] `ARTICLE_SOURCES`에서 `newswire`, `NEWSWIRE_ACTIONS` 제거
-- [ ] UI 정리: `ManualFetchManager` 탭, `ArticleBoard` SOURCE_OPTIONS, `articles/page` VALID_SOURCES, `settings/SourceConfigManager`
-- [ ] `DELETED` 상태 정리(뉴스와이어 delete 트리거였음) — enum/문서에서 정합성 맞춤
-- [ ] `prd.md` / `PROJECT_RULES.md`에서 뉴스와이어 규칙 제거·개편 반영
+- [x] `ARTICLE_SOURCES`에서 `newswire`, `NEWSWIRE_ACTIONS`, `NewswireAction` 제거
+- [x] 발행 워커 newswire 부제목 폴백 분기 제거
+- [x] UI 정리: `ManualFetchManager` 탭/sourceParam, `ArticleBoard` SOURCE_OPTIONS, `articles/page` VALID_SOURCES, `settings/SourceConfigManager`, 대시보드 운영기준 카드
+- [x] `prd.md` / `PROJECT_RULES.md` 상단에 개편 안내 배너(뉴스와이어 규칙 무효화)
+- [ ] `DELETED` 상태: enum 유지(향후 미사용), 대시보드엔 이미 제외됨 — 추가 조치 없음
 
 ### Phase 2 — 정부 피드 (저작권 안전, 피드 파이프라인 검증)
 - [ ] RSS 파서 의존성 추가(`rss-parser` 권장) + `sources/rss-base.ts` 공통 어댑터

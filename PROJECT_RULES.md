@@ -2,6 +2,9 @@
 
 이 문서는 `d-maker.kr` 뉴스 자동/수동 수집 및 업로드 시스템의 합의된 구축 규칙이다. Codex, Claude, 기타 자동화 에이전트는 구현 전에 이 문서를 우선 참조한다.
 
+> **⚠️ 개편 안내 (2026-07-02):** **뉴스와이어 연동은 제거**되었다. 서비스는 무료 해외 뉴스 다중 소스 애그리게이터로 개편 중이다.
+> 이 문서의 `Newswire`, 콜백/HMAC, `insert/update/delete` action 관련 규칙은 더 이상 적용되지 않는다. 현행 계획은 [`docs/free-news-aggregator-plan.md`](docs/free-news-aggregator-plan.md)를 따른다.
+
 ## 1. Product Scope
 
 - 목표는 NewsData.io 및 뉴스와이어 API에서 뉴스를 수집하고, 전처리 후 `d-maker.kr` 관리자 페이지를 통해 자동 또는 수동 발행하는 통합 관리 시스템을 구축하는 것이다.

@@ -240,10 +240,10 @@ export default async function HomePage(): Promise<JSX.Element> {
                 </div>
                 <div className="rounded-lg border-l-4 border-emerald-400 bg-emerald-50/60 px-4 py-3">
                   <dt className="text-xs font-semibold uppercase text-emerald-700">
-                    Newswire
+                    번역·발행
                   </dt>
                   <dd className="mt-1 text-sm font-medium text-ink-700">
-                    insert/update/delete action 처리
+                    OpenAI 번역 후 d-maker.kr 발행
                   </dd>
                 </div>
                 <div className="rounded-lg border-l-4 border-purple-400 bg-purple-50/60 px-4 py-3">

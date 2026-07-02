@@ -5,7 +5,6 @@ import stealth from "puppeteer-extra-plugin-stealth";
 import path from "node:path";
 import fs from "node:fs/promises";
 import {
-  ARTICLE_SOURCES,
   ARTICLE_STATUSES,
   JOB_STATUSES,
   PUBLISH_FAILED_STEPS,
@@ -53,11 +52,7 @@ function getArticleSubtitle(article: ArticleRow): string | null {
   if (article.translated_subtitle) {
     return article.translated_subtitle;
   }
-  // 뉴스와이어(국내 보도자료)만 원본 부제목(한국어)을 폴백으로 허용한다.
-  // NewsData 등 해외 소스의 외국어 원문 부제목은 발행하지 않는다.
-  if (article.source === ARTICLE_SOURCES.newswire) {
-    return article.subtitle;
-  }
+  // 모든 소스가 해외 뉴스이므로 외국어 원문 부제목은 발행하지 않는다.
   return null;
 }
 

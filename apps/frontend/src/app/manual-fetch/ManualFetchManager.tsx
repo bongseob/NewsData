@@ -84,11 +84,10 @@ function compactPayload(payload: unknown): string {
   return entries.length > 0 ? entries.join(", ") : "-";
 }
 
-type SourceTab = "newsdata" | "newswire";
+type SourceTab = "newsdata";
 
 const SOURCE_TABS: { key: SourceTab; label: string; disabled?: boolean }[] = [
-  { key: "newsdata", label: "NewsData.io" },
-  { key: "newswire", label: "뉴스와이어", disabled: true }
+  { key: "newsdata", label: "NewsData.io" }
 ];
 
 interface FetchPreset {
@@ -136,7 +135,7 @@ export function ManualFetchManager(): JSX.Element {
   const countryString = useMemo(() => joinSelectedValues(countries), [countries]);
   const languageString = useMemo(() => joinSelectedValues(languages), [languages]);
 
-  const sourceParam = activeSource === "newsdata" ? "NEWSDATA" : "NEWSWIRE";
+  const sourceParam = "NEWSDATA";
 
   // 개별 입력 상태를 단일 폼 모델로 읽어낸다 (제출·수정·프리셋 저장 공통 입력).
   const readForm = useCallback(

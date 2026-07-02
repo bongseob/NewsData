@@ -16,7 +16,7 @@ const TAB_QUERY: Record<BoardTab, string> = {
 };
 
 const VALID_TABS: BoardTab[] = ["pending", "selected", "ready", "excluded"];
-const VALID_SOURCES = ["NEWSDATA", "NEWSWIRE"];
+const VALID_SOURCES = ["NEWSDATA"];
 const VALID_SORTS: BoardSortColumn[] = ["updated_at", "created_at", "press_time"];
 const VALID_ORDERS = ["asc", "desc"];
 

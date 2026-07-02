@@ -17,8 +17,7 @@ interface SourceConfig {
 }
 
 const sourceLabels: Record<string, string> = {
-  NEWSDATA: "NewsData.io",
-  NEWSWIRE: "뉴스와이어"
+  NEWSDATA: "NewsData.io"
 };
 
 export function SourceConfigManager() {
@@ -227,7 +226,6 @@ export function SourceConfigManager() {
                 className="w-full rounded-md border border-line px-3 py-2 text-sm disabled:bg-slate-50"
               >
                 <option value="NEWSDATA">NewsData.io</option>
-                <option value="NEWSWIRE">뉴스와이어</option>
               </select>
             </div>
 
