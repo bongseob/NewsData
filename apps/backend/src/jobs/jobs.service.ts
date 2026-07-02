@@ -43,8 +43,15 @@ export interface CreateFetchJobResult {
   fetchJobId: number;
   queueJobId: string;
   source: ArticleSource;
-  query: NewsDataFetchQuery;
+  query: Record<string, unknown>;
 }
+
+// 수동 수집을 지원하는 소스. 피드 소스(SEC/Fed)는 NewsData 쿼리 정규화를 적용하지 않는다.
+const MANUAL_FETCH_SOURCES: ReadonlySet<string> = new Set<string>([
+  ARTICLE_SOURCES.newsdata,
+  ARTICLE_SOURCES.sec,
+  ARTICLE_SOURCES.fed
+]);
 
 export interface CancelFetchJobResult {
   canceled: true;
@@ -228,11 +235,15 @@ export class JobsService {
   }
 
   async createFetchJob(input: CreateFetchJobRequest): Promise<CreateFetchJobResult> {
-    if (input.source !== ARTICLE_SOURCES.newsdata) {
-      throw new BadRequestException("Manual fetch currently supports only NEWSDATA.");
+    if (!MANUAL_FETCH_SOURCES.has(input.source)) {
+      throw new BadRequestException(`Unsupported manual fetch source: ${input.source}`);
     }
 
-    const query = this.normalizeNewsDataQuery(input.query);
+    // NewsData는 쿼리 정규화, 피드 소스(SEC/Fed)는 파라미터를 그대로 전달한다.
+    const query: Record<string, unknown> =
+      input.source === ARTICLE_SOURCES.newsdata
+        ? (this.normalizeNewsDataQuery(input.query) as Record<string, unknown>)
+        : input.query ?? {};
     const fetchJobId = await new FetchJobsRepository(this.pool).create({
       source: input.source,
       triggerType: JOB_TRIGGER_TYPES.manual,
@@ -261,7 +272,10 @@ export class JobsService {
       throw new BadRequestException("Only prepared fetch jobs can be updated.");
     }
 
-    const normalizedQuery = this.normalizeNewsDataQuery(query);
+    const normalizedQuery =
+      fetchJob.source === ARTICLE_SOURCES.newsdata
+        ? this.normalizeNewsDataQuery(query)
+        : query;
     await repository.updatePayload(id, normalizedQuery);
   }
 
@@ -295,8 +309,8 @@ export class JobsService {
   }
 
   async listFetchJobs(input: ListFetchJobsRequest): Promise<{ items: FetchJobRow[]; total: number }> {
-    if (input.source && input.source !== ARTICLE_SOURCES.newsdata) {
-      throw new BadRequestException("Fetch job list currently supports only NEWSDATA filtering.");
+    if (input.source && !MANUAL_FETCH_SOURCES.has(input.source)) {
+      throw new BadRequestException(`Unsupported fetch job source filter: ${input.source}`);
     }
 
     const repository = new FetchJobsRepository(this.pool);

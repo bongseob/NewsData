@@ -126,11 +126,16 @@
 - [ ] `DELETED` 상태: enum 유지(향후 미사용), 대시보드엔 이미 제외됨 — 추가 조치 없음
 
 ### Phase 2 — 정부 피드 (저작권 안전, 피드 파이프라인 검증)
-- [ ] RSS 파서 의존성 추가(`rss-parser` 권장) + `sources/rss-base.ts` 공통 어댑터
-- [ ] `sources/sec.ts`(User-Agent 필수), `sources/fed.ts`
-- [ ] 피드 URL 등 설정은 `source_configs.query`에 저장
-- [ ] `license_policy = PUBLIC_DOMAIN`로 전문 번역 발행 경로 확인
-- [ ] 교차 소스 dedup 1차: `canonical_url` 정규화 + 컬럼/인덱스 추가
+- [x] RSS 파서 의존성 추가(`rss-parser`) + `sources/rss-base.ts` 공통 어댑터
+- [x] `sources/sec.ts`(User-Agent 필수, press-release RSS만), `sources/fed.ts`
+- [x] `ARTICLE_SOURCES`에 `sec`/`fed` 추가, 레지스트리 등록
+- [x] 백엔드 수동 수집 소스 제한 완화(newsdata/sec/fed), 피드 소스는 쿼리 정규화 생략
+- [x] 프런트 수동수집 SEC/Fed 탭 + 피드 수집 패널(공유 잡 목록)
+- [x] 마이그 008: `license_policy`, `canonical_url`(prefix 인덱스) 추가 + upsert 저장
+- [x] SEC/Fed RSS 실제 도달·파싱 검증(각 25/20건)
+- [ ] `license_policy = PUBLIC_DOMAIN` 전문 발행 / `LICENSED` 요약+링크 **발행 정책 분기** → Phase 3
+- [ ] 피드 URL을 `source_configs.query`에 저장(현재 어댑터 기본값 사용) → Phase 5 소스관리 UI
+- [ ] 교차 소스 dedup 실제 억제(canonical_url 저장만 됨) → Phase 5
 
 ### Phase 3 — 검색형 API 확장
 - [ ] `sources/gdelt.ts`(무키, Reuters 도메인 필터 포함)

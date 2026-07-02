@@ -34,6 +34,8 @@ export interface ArticleRow extends RowDataPacket {
   press_time: Date | null;
   raw_payload: unknown;
   fetch_job_id: number | null;
+  license_policy: string | null;
+  canonical_url: string | null;
   created_at: Date;
   updated_at: Date;
   thumbnail_local_path?: string | null;
@@ -110,6 +112,8 @@ export interface UpsertArticleInput {
   pressTime?: Date | null;
   rawPayload: unknown;
   fetchJobId?: number | null;
+  licensePolicy?: string | null;
+  canonicalUrl?: string | null;
 }
 
 export class ArticlesRepository {
@@ -200,7 +204,9 @@ export class ArticlesRepository {
         source_url,
         press_time,
         raw_payload,
-        fetch_job_id
+        fetch_job_id,
+        license_policy,
+        canonical_url
       ) VALUES (
         :source,
         :externalId,
@@ -222,7 +228,9 @@ export class ArticlesRepository {
         :sourceUrl,
         :pressTime,
         :rawPayload,
-        :fetchJobId
+        :fetchJobId,
+        :licensePolicy,
+        :canonicalUrl
       )
       ON DUPLICATE KEY UPDATE
         status = VALUES(status),
@@ -245,6 +253,8 @@ export class ArticlesRepository {
         raw_payload = VALUES(raw_payload),
         -- 최초 수집 요청을 보존한다: 기존 값이 있으면 유지, 없을 때만 채운다.
         fetch_job_id = COALESCE(fetch_job_id, VALUES(fetch_job_id)),
+        license_policy = VALUES(license_policy),
+        canonical_url = VALUES(canonical_url),
         updated_at = CURRENT_TIMESTAMP(3)`,
       {
         source: input.source,
@@ -267,7 +277,9 @@ export class ArticlesRepository {
         sourceUrl: input.sourceUrl ?? null,
         pressTime: input.pressTime ?? null,
         rawPayload: JSON.stringify(input.rawPayload),
-        fetchJobId: input.fetchJobId ?? null
+        fetchJobId: input.fetchJobId ?? null,
+        licensePolicy: input.licensePolicy ?? null,
+        canonicalUrl: input.canonicalUrl ?? null
       }
     );
 

@@ -114,7 +114,9 @@ export function registerProcessWorker(
         sourceUrl,
         pressTime,
         rawPayload: article.rawPayload,
-        fetchJobId: fetchJobId ?? null
+        fetchJobId: fetchJobId ?? null,
+        licensePolicy: article.licensePolicy,
+        canonicalUrl: article.canonicalUrl
       });
 
       console.log(

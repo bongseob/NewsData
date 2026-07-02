@@ -21,6 +21,7 @@
     "playwright": "^1.45.0",
     "playwright-extra": "^4.3.6",
     "puppeteer-extra-plugin-stealth": "^2.11.2",
+    "rss-parser": "^3.13.0",
     "sharp": "^0.35.2",
     "ts-node": "^10.9.2"
   },

@@ -84,11 +84,19 @@ function compactPayload(payload: unknown): string {
   return entries.length > 0 ? entries.join(", ") : "-";
 }
 
-type SourceTab = "newsdata";
+type SourceTab = "newsdata" | "sec" | "fed";
 
 const SOURCE_TABS: { key: SourceTab; label: string; disabled?: boolean }[] = [
-  { key: "newsdata", label: "NewsData.io" }
+  { key: "newsdata", label: "NewsData.io" },
+  { key: "sec", label: "SEC" },
+  { key: "fed", label: "Federal Reserve" }
 ];
+
+const SOURCE_PARAM_BY_TAB: Record<SourceTab, string> = {
+  newsdata: "NEWSDATA",
+  sec: "SEC",
+  fed: "FED"
+};
 
 interface FetchPreset {
   id: number;
@@ -135,7 +143,7 @@ export function ManualFetchManager(): JSX.Element {
   const countryString = useMemo(() => joinSelectedValues(countries), [countries]);
   const languageString = useMemo(() => joinSelectedValues(languages), [languages]);
 
-  const sourceParam = "NEWSDATA";
+  const sourceParam = SOURCE_PARAM_BY_TAB[activeSource];
 
   // 개별 입력 상태를 단일 폼 모델로 읽어낸다 (제출·수정·프리셋 저장 공통 입력).
   const readForm = useCallback(
@@ -534,6 +542,32 @@ export function ManualFetchManager(): JSX.Element {
     }
   };
 
+  // 피드 소스(SEC/Fed)는 폼 입력 없이 설정된 RSS에서 수집한다.
+  const submitFeedFetch = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setSubmitting(true);
+    setMessage(null);
+    try {
+      const res = await fetch(`${API_BASE}/jobs/fetch`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ source: sourceParam, query: {} })
+      });
+      if (!res.ok) {
+        const errorText = await res.text();
+        setMessage(`수집 요청 실패: ${errorText}`);
+        return;
+      }
+      const data = await res.json();
+      setMessage(`수집 작업 #${data.fetchJobId} 등록 완료`);
+      await loadJobs();
+    } catch {
+      setMessage("서버 연결 중 오류가 발생했습니다.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   const cancelJob = async (id: number) => {
     const confirmed = window.confirm(`대기 중인 수집 작업 #${id}을 취소할까요?`);
     if (!confirmed) return;
@@ -588,8 +622,8 @@ export function ManualFetchManager(): JSX.Element {
         ))}
       </div>
 
-      {activeSource === "newsdata" ? (
-        <div className="grid gap-6 xl:grid-cols-[520px_1fr]">
+      <div className="grid gap-6 xl:grid-cols-[520px_1fr]">
+        {activeSource === "newsdata" ? (
           <form
         onSubmit={editingJobId !== null ? saveEditJob : submit}
         className="rounded-lg border border-line bg-white p-6 shadow-panel"
@@ -1042,6 +1076,34 @@ export function ManualFetchManager(): JSX.Element {
           </button>
         )}
       </form>
+        ) : (
+          <form
+            onSubmit={submitFeedFetch}
+            className="rounded-lg border border-line bg-white p-6 shadow-panel"
+          >
+            <h3 className="text-base font-bold">
+              {activeSource === "sec"
+                ? "SEC 보도자료 수집"
+                : "Federal Reserve 보도자료 수집"}
+            </h3>
+            <p className="mt-3 text-sm text-ink-500">
+              설정된 공식 RSS 피드에서 최신 보도자료를 수집합니다. 미국 정부 자료(퍼블릭
+              도메인)로 전문 번역 발행이 가능합니다.
+            </p>
+            {message && (
+              <p className="mt-4 rounded-md bg-slate-50 px-3 py-2 text-sm text-ink-700">
+                {message}
+              </p>
+            )}
+            <button
+              type="submit"
+              disabled={submitting}
+              className="mt-5 w-full rounded-md bg-[#1167b1] px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-[#0e5a9b] disabled:opacity-50"
+            >
+              {submitting ? "수집 요청 중..." : "수집 작업 등록"}
+            </button>
+          </form>
+        )}
 
       <section className="rounded-lg border border-line bg-white p-6 shadow-panel">
         <div className="mb-4 flex items-center justify-between gap-3">
@@ -1100,13 +1162,15 @@ export function ManualFetchManager(): JSX.Element {
                       <div className="flex gap-2">
                         {job.status === "PREPARED" ? (
                           <>
-                            <button
-                              type="button"
-                              onClick={() => startEditJob(job)}
-                              className="rounded-md border border-amber-200 px-2.5 py-1 font-semibold text-amber-700 hover:bg-amber-50"
-                            >
-                              수정
-                            </button>
+                            {activeSource === "newsdata" && (
+                              <button
+                                type="button"
+                                onClick={() => startEditJob(job)}
+                                className="rounded-md border border-amber-200 px-2.5 py-1 font-semibold text-amber-700 hover:bg-amber-50"
+                              >
+                                수정
+                              </button>
+                            )}
                             <button
                               type="button"
                               onClick={() => void submitJob(job.id)}
@@ -1144,8 +1208,7 @@ export function ManualFetchManager(): JSX.Element {
           </div>
         )}
       </section>
-        </div>
-      ) : null}
+      </div>
     </div>
   );
 }
