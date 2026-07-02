@@ -1,3 +1,4 @@
+import { ARTICLE_SOURCES } from "@newsdata/shared";
 import { Sidebar } from "../components/Sidebar";
 import { API_BASE } from "../../lib/api-base";
 import {
@@ -16,7 +17,7 @@ const TAB_QUERY: Record<BoardTab, string> = {
 };
 
 const VALID_TABS: BoardTab[] = ["pending", "selected", "ready", "excluded"];
-const VALID_SOURCES = ["NEWSDATA"];
+const VALID_SOURCES: string[] = Object.values(ARTICLE_SOURCES);
 const VALID_SORTS: BoardSortColumn[] = ["updated_at", "created_at", "press_time"];
 const VALID_ORDERS = ["asc", "desc"];
 

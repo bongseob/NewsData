@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
+import { ARTICLE_SOURCES } from "@newsdata/shared";
 import { API_BASE } from "../../lib/api-base";
 
 export type BoardTab = "pending" | "selected" | "ready" | "excluded";
@@ -53,9 +54,18 @@ interface ArticleBoardProps {
   reviewCounts?: ReviewCounts;
 }
 
+const SOURCE_LABELS: Record<string, string> = {
+  NEWSDATA: "NewsData.io",
+  SEC: "SEC",
+  FED: "Federal Reserve"
+};
+
 const SOURCE_OPTIONS = [
   { value: "", label: "전체 출처" },
-  { value: "NEWSDATA", label: "NewsData.io" }
+  ...Object.values(ARTICLE_SOURCES).map((value) => ({
+    value,
+    label: SOURCE_LABELS[value] ?? value
+  }))
 ];
 
 const SORT_OPTIONS: { value: BoardSortColumn; label: string }[] = [
