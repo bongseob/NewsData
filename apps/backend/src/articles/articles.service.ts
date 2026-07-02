@@ -44,6 +44,7 @@ export interface ListArticlesRequest {
   reviewState?: ArticleReviewState;
   source?: ArticleSource;
   search?: string;
+  fetchJobId?: number;
   sort?: ArticleSortColumn;
   order?: ArticleSortOrder;
   limit?: number;

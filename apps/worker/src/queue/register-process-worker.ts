@@ -72,7 +72,7 @@ export function registerProcessWorker(
     QUEUE_NAMES.process,
     async (job) => {
       console.log(`[Process] job accepted: ${job.id}`);
-      const { source, articleData } = job.data;
+      const { source, articleData, fetchJobId } = job.data;
 
       if (source !== ARTICLE_SOURCES.newsdata) {
         console.log(`[Process] Ignored source: ${source}`);
@@ -151,7 +151,8 @@ export function registerProcessWorker(
         country,
         sourceUrl,
         pressTime,
-        rawPayload: articleData
+        rawPayload: articleData,
+        fetchJobId: fetchJobId ?? null
       });
 
       console.log(

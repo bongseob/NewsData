@@ -9,6 +9,7 @@ import {
   ParseIntPipe,
   Patch,
   Post,
+  Put,
   Query
 } from "@nestjs/common";
 import type { ArticleSource, JobStatus } from "@newsdata/shared";
@@ -65,6 +66,14 @@ export class JobsController {
   @Get("presets")
   listPresets(@Query("source") source: string) {
     return this.jobsService.listPresets(source);
+  }
+
+  @Put("presets/:id")
+  updatePreset(
+    @Param("id", ParseIntPipe) id: number,
+    @Body() body: { name: string; query: Record<string, unknown> }
+  ) {
+    return this.jobsService.updatePreset(id, body.name, body.query);
   }
 
   @Delete("presets/:id")

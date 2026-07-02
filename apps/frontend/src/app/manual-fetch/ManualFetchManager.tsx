@@ -14,6 +14,15 @@ import {
   type NewsDataPriorityDomain
 } from "@newsdata/shared";
 import { API_BASE } from "../../lib/api-base";
+import {
+  DEFAULT_FORM,
+  EMPTY_FORM,
+  formToQuery,
+  isSameForm,
+  queryToForm,
+  type FetchFormState,
+  type FetchRangeMode
+} from "./fetch-form";
 
 interface FetchJob {
   id: number;
@@ -76,7 +85,6 @@ function compactPayload(payload: unknown): string {
 }
 
 type SourceTab = "newsdata" | "newswire";
-type FetchRangeMode = "latest" | "archive";
 
 const SOURCE_TABS: { key: SourceTab; label: string; disabled?: boolean }[] = [
   { key: "newsdata", label: "NewsData.io" },
@@ -118,6 +126,8 @@ export function ManualFetchManager(): JSX.Element {
   const [selectedPresetId, setSelectedPresetId] = useState<number | "">("");
   const [presetName, setPresetName] = useState("");
   const [savingPreset, setSavingPreset] = useState(false);
+  const [presetsLoading, setPresetsLoading] = useState(false);
+  const [presetsError, setPresetsError] = useState(false);
 
   // 수정 모드 관련 React 상태 추가
   const [editingJobId, setEditingJobId] = useState<number | null>(null);
@@ -128,16 +138,72 @@ export function ManualFetchManager(): JSX.Element {
 
   const sourceParam = activeSource === "newsdata" ? "NEWSDATA" : "NEWSWIRE";
 
+  // 개별 입력 상태를 단일 폼 모델로 읽어낸다 (제출·수정·프리셋 저장 공통 입력).
+  const readForm = useCallback(
+    (): FetchFormState => ({
+      q,
+      categories,
+      countries,
+      languages,
+      fetchRange,
+      fromDate,
+      toDate,
+      domainUrl,
+      priorityDomain,
+      domain,
+      size,
+      removeDuplicate
+    }),
+    [
+      q,
+      categories,
+      countries,
+      languages,
+      fetchRange,
+      fromDate,
+      toDate,
+      domainUrl,
+      priorityDomain,
+      domain,
+      size,
+      removeDuplicate
+    ]
+  );
+
+  // 폼 모델을 개별 입력 상태에 일괄 반영한다 (프리셋 불러오기·작업 수정 공통).
+  const applyForm = useCallback((form: FetchFormState) => {
+    setQ(form.q);
+    setCategories(form.categories);
+    setCountries(form.countries);
+    setLanguages(form.languages);
+    setFetchRange(form.fetchRange);
+    setFromDate(form.fromDate);
+    setToDate(form.toDate);
+    setDomainUrl(form.domainUrl);
+    setPriorityDomain(form.priorityDomain);
+    setDomain(form.domain);
+    setSize(form.size);
+    setRemoveDuplicate(form.removeDuplicate);
+  }, []);
+
   const loadPresets = useCallback(async () => {
+    setPresetsLoading(true);
+    setPresetsError(false);
     try {
       const res = await fetch(`${API_BASE}/jobs/presets?source=${sourceParam}`, {
         cache: "no-store"
       });
-      if (!res.ok) return;
+      if (!res.ok) {
+        setPresetsError(true);
+        return;
+      }
       const data = await res.json();
-      setPresets(data ?? []);
+      setPresets(Array.isArray(data) ? data : []);
     } catch (error) {
       console.error("Failed to load presets:", error);
+      setPresetsError(true);
+    } finally {
+      setPresetsLoading(false);
     }
   }, [sourceParam]);
 
@@ -152,23 +218,28 @@ export function ManualFetchManager(): JSX.Element {
     setTotal(data.total ?? 0);
   }, [sourceParam]);
 
+  const selectedPreset = useMemo(
+    () =>
+      selectedPresetId === ""
+        ? null
+        : presets.find((p) => p.id === selectedPresetId) ?? null,
+    [selectedPresetId, presets]
+  );
+
+  // 선택된 프리셋 대비 폼이 수정되었는지 (덮어쓰기 버튼/뱃지 노출용).
+  const isPresetDirty = useMemo(
+    () =>
+      selectedPreset !== null &&
+      !isSameForm(readForm(), queryToForm(selectedPreset.query)),
+    [selectedPreset, readForm]
+  );
+
   // 수정 취소 및 입력값 초기화
   const cancelEditMode = useCallback(() => {
     setEditingJobId(null);
     setMessage(null);
-    setQ("");
-    setCategories([]);
-    setCountries([]);
-    setLanguages([]);
-    setFetchRange("latest");
-    setDomainUrl("");
-    setPriorityDomain("");
-    setFromDate("");
-    setToDate("");
-    setDomain("");
-    setSize("10");
-    setRemoveDuplicate(true);
-  }, []);
+    applyForm(EMPTY_FORM);
+  }, [applyForm]);
 
   // 큐 최종 제출 요청
   const submitJob = async (id: number) => {
@@ -195,45 +266,9 @@ export function ManualFetchManager(): JSX.Element {
   // 수정 모드 진입 (기존 페이로드 폼 바인딩)
   const startEditJob = (job: FetchJob) => {
     setEditingJobId(job.id);
+    setSelectedPresetId("");
     setMessage(null);
-    
-    const qry = job.request_payload as any;
-    setQ(String(qry.q ?? ""));
-    
-    if (qry.category && typeof qry.category === "string") {
-      setCategories(qry.category.split(",") as NewsDataCategory[]);
-    } else {
-      setCategories([]);
-    }
-
-    if (qry.country && typeof qry.country === "string") {
-      setCountries(qry.country.split(",") as NewsDataCountry[]);
-    } else {
-      setCountries([]);
-    }
-
-    if (qry.language && typeof qry.language === "string") {
-      setLanguages(qry.language.split(",") as NewsDataLanguage[]);
-    } else {
-      setLanguages([]);
-    }
-
-    if (qry.from_date || qry.to_date) {
-      setFetchRange("archive");
-      setFromDate(String(qry.from_date ?? ""));
-      setToDate(String(qry.to_date ?? ""));
-    } else {
-      setFetchRange("latest");
-      setFromDate("");
-      setToDate("");
-    }
-
-    setDomainUrl(String(qry.domainurl ?? ""));
-    setPriorityDomain((qry.prioritydomain as NewsDataPriorityDomain) || "");
-    setDomain(String(qry.domain ?? ""));
-    setSize(String(qry.size ?? "10"));
-    setRemoveDuplicate(qry.removeduplicate !== 0);
-
+    applyForm(queryToForm(job.request_payload));
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
@@ -245,20 +280,7 @@ export function ManualFetchManager(): JSX.Element {
     setSubmitting(true);
     setMessage(null);
 
-    const query: Record<string, unknown> = {};
-    if (q.trim()) query.q = q.trim();
-    if (categories.length > 0) query.category = categories.join(",");
-    if (countryString) query.country = countryString;
-    if (languageString) query.language = languageString;
-    if (domainUrl.trim()) query.domainurl = parseCommaValues(domainUrl).join(",");
-    if (priorityDomain) query.prioritydomain = priorityDomain;
-    if (fetchRange === "archive") {
-      query.from_date = fromDate;
-      query.to_date = toDate;
-    }
-    if (domain.trim()) query.domain = domain.trim();
-    if (size.trim()) query.size = Number(size);
-    query.removeduplicate = removeDuplicate ? 1 : 0;
+    const query = formToQuery(readForm());
 
     try {
       const res = await fetch(`${API_BASE}/jobs/fetch/${editingJobId}`, {
@@ -290,63 +312,21 @@ export function ManualFetchManager(): JSX.Element {
 
   // 프리셋 선택 적용 핸들러
   const handleSelectPreset = (presetId: number | "") => {
+    // 수정 모드 중에는 프리셋으로 폼을 덮어쓰지 않는다.
+    if (editingJobId !== null) return;
+
     setSelectedPresetId(presetId);
+    setMessage(null);
+
     if (presetId === "") {
-      // 신규 입력 상태 (초기화)
-      setQ("");
-      setCategories([]);
-      setCountries([]);
-      setLanguages([]);
-      setFetchRange("latest");
-      setDomainUrl("");
-      setPriorityDomain("");
-      setFromDate("");
-      setToDate("");
-      setDomain("");
-      setSize("10");
-      setRemoveDuplicate(true);
+      applyForm(EMPTY_FORM);
       return;
     }
 
     const targetPreset = presets.find((p) => p.id === presetId);
     if (!targetPreset) return;
 
-    const qry = targetPreset.query;
-    setQ(String(qry.q ?? ""));
-    
-    if (qry.category && typeof qry.category === "string") {
-      setCategories(qry.category.split(",") as NewsDataCategory[]);
-    } else {
-      setCategories([]);
-    }
-
-    if (qry.country && typeof qry.country === "string") {
-      setCountries(qry.country.split(",") as NewsDataCountry[]);
-    } else {
-      setCountries([]);
-    }
-
-    if (qry.language && typeof qry.language === "string") {
-      setLanguages(qry.language.split(",") as NewsDataLanguage[]);
-    } else {
-      setLanguages([]);
-    }
-
-    if (qry.from_date || qry.to_date) {
-      setFetchRange("archive");
-      setFromDate(String(qry.from_date ?? ""));
-      setToDate(String(qry.to_date ?? ""));
-    } else {
-      setFetchRange("latest");
-      setFromDate("");
-      setToDate("");
-    }
-
-    setDomainUrl(String(qry.domainurl ?? ""));
-    setPriorityDomain((qry.prioritydomain as NewsDataPriorityDomain) || "");
-    setDomain(String(qry.domain ?? ""));
-    setSize(String(qry.size ?? "10"));
-    setRemoveDuplicate(qry.removeduplicate !== 0);
+    applyForm(queryToForm(targetPreset.query));
   };
 
   // 프리셋 등록 핸들러
@@ -358,28 +338,16 @@ export function ManualFetchManager(): JSX.Element {
     setSavingPreset(true);
     setMessage(null);
 
-    const query: Record<string, unknown> = {};
-    if (q.trim()) query.q = q.trim();
-    if (categories.length > 0) query.category = categories.join(",");
-    if (countryString) query.country = countryString;
-    if (languageString) query.language = languageString;
-    if (domainUrl.trim()) query.domainurl = parseCommaValues(domainUrl).join(",");
-    if (priorityDomain) query.prioritydomain = priorityDomain;
-    if (fetchRange === "archive") {
-      query.from_date = fromDate;
-      query.to_date = toDate;
-    }
-    if (domain.trim()) query.domain = domain.trim();
-    if (size.trim()) query.size = Number(size);
-    query.removeduplicate = removeDuplicate ? 1 : 0;
+    const query = formToQuery(readForm());
+    const name = presetName.trim();
 
     try {
       const res = await fetch(`${API_BASE}/jobs/presets`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          name: presetName.trim(),
-          source: "NEWSDATA",
+          name,
+          source: sourceParam,
           query
         })
       });
@@ -390,11 +358,49 @@ export function ManualFetchManager(): JSX.Element {
         return;
       }
 
-      setMessage(`프리셋 "${presetName.trim()}" 저장 완료`);
+      const newId = (await res.json()) as number;
+      setMessage(`프리셋 "${name}" 저장 완료`);
       setPresetName("");
       await loadPresets();
+      // 방금 저장한 프리셋을 선택 상태로 (수정 모드가 아닐 때만)
+      if (editingJobId === null && typeof newId === "number") {
+        setSelectedPresetId(newId);
+      }
     } catch {
       setMessage("프리셋 저장 중 오류가 발생했습니다.");
+    } finally {
+      setSavingPreset(false);
+    }
+  };
+
+  // 선택된 프리셋을 현재 폼 내용으로 덮어쓰기(수정)
+  const handleUpdatePreset = async () => {
+    if (selectedPresetId === "") return;
+    const target = presets.find((p) => p.id === selectedPresetId);
+    if (!target) return;
+
+    setSavingPreset(true);
+    setMessage(null);
+
+    const query = formToQuery(readForm());
+
+    try {
+      const res = await fetch(`${API_BASE}/jobs/presets/${selectedPresetId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: target.name, query })
+      });
+
+      if (!res.ok) {
+        const errorText = await res.text();
+        setMessage(`프리셋 수정 실패: ${errorText}`);
+        return;
+      }
+
+      setMessage(`프리셋 "${target.name}" 수정 완료`);
+      await loadPresets();
+    } catch {
+      setMessage("프리셋 수정 중 오류가 발생했습니다.");
     } finally {
       setSavingPreset(false);
     }
@@ -504,26 +510,13 @@ export function ManualFetchManager(): JSX.Element {
       return;
     }
 
-    const query: Record<string, string | number> = {};
-    if (q.trim()) query.q = q.trim();
-    if (categories.length > 0) query.category = categories.join(",");
-    if (countryString) query.country = countryString;
-    if (languageString) query.language = languageString;
-    if (domainUrl.trim()) query.domainurl = parseCommaValues(domainUrl).join(",");
-    if (priorityDomain) query.prioritydomain = priorityDomain;
-    if (fetchRange === "archive") {
-      query.from_date = fromDate;
-      query.to_date = toDate;
-    }
-    if (domain.trim()) query.domain = domain.trim();
-    if (size.trim()) query.size = Number(size);
-    query.removeduplicate = removeDuplicate ? 1 : 0;
+    const query = formToQuery(readForm());
 
     try {
       const res = await fetch(`${API_BASE}/jobs/fetch`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ source: "NEWSDATA", query })
+        body: JSON.stringify({ source: sourceParam, query })
       });
 
       if (!res.ok) {
@@ -618,60 +611,104 @@ export function ManualFetchManager(): JSX.Element {
           </div>
         )}
 
-        {/* 프리셋 컨트롤 패널 */}
-        <div className="mt-4 rounded-md border border-dashed border-line bg-slate-50 p-4">
-          <div className="grid gap-3">
-            <div className="grid gap-1.5">
-              <span className="text-xs font-bold text-ink-700">수집 프리셋 불러오기</span>
-              <div className="flex gap-2">
-                <select
-                  value={selectedPresetId}
-                  onChange={(event) => handleSelectPreset(event.target.value === "" ? "" : Number(event.target.value))}
-                  className="w-full rounded-md border border-line bg-white px-3 py-1.5 text-xs text-ink-700"
-                >
-                  <option value="">-- 프리셋 선택 안 함 (신규 입력) --</option>
-                  {presets.map((preset) => (
-                    <option key={preset.id} value={preset.id}>
-                      {preset.name} (키워드: {String((preset.query as any)?.q || "-")})
-                    </option>
-                  ))}
-                </select>
-                {selectedPresetId !== "" && (
-                  <button
-                    type="button"
-                    onClick={() => handleDeletePreset(Number(selectedPresetId))}
-                    className="rounded-md border border-red-200 bg-white px-3 py-1.5 text-xs font-semibold text-red-600 hover:bg-red-50"
+        {/* 프리셋 컨트롤 패널 (수정 모드에서는 숨김) */}
+        {editingJobId === null && (
+          <div className="mt-4 rounded-md border border-dashed border-line bg-slate-50 p-4">
+            <div className="grid gap-3">
+              <div className="grid gap-1.5">
+                <span className="flex items-center gap-2 text-xs font-bold text-ink-700">
+                  수집 프리셋 불러오기
+                  {isPresetDirty && (
+                    <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-700">
+                      수정됨
+                    </span>
+                  )}
+                </span>
+                <div className="flex gap-2">
+                  <select
+                    value={selectedPresetId}
+                    onChange={(event) =>
+                      handleSelectPreset(event.target.value === "" ? "" : Number(event.target.value))
+                    }
+                    disabled={presetsLoading}
+                    className="min-w-0 flex-1 rounded-md border border-line bg-white px-3 py-1.5 text-xs text-ink-700 disabled:bg-slate-100"
                   >
-                    삭제
-                  </button>
+                    <option value="">
+                      {presetsLoading
+                        ? "프리셋 불러오는 중..."
+                        : "-- 프리셋 선택 안 함 (신규 입력) --"}
+                    </option>
+                    {presets.map((preset) => (
+                      <option key={preset.id} value={preset.id}>
+                        {preset.name} (키워드: {String((preset.query as any)?.q || "-")})
+                      </option>
+                    ))}
+                  </select>
+                  {selectedPresetId !== "" && (
+                    <>
+                      <button
+                        type="button"
+                        disabled={savingPreset || !isPresetDirty}
+                        onClick={handleUpdatePreset}
+                        title={isPresetDirty ? "현재 설정으로 이 프리셋 덮어쓰기" : "변경 사항 없음"}
+                        className="whitespace-nowrap rounded-md border border-line bg-white px-3 py-1.5 text-xs font-semibold text-ink-700 hover:bg-slate-50 disabled:opacity-40"
+                      >
+                        덮어쓰기
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleDeletePreset(Number(selectedPresetId))}
+                        className="rounded-md border border-red-200 bg-white px-3 py-1.5 text-xs font-semibold text-red-600 hover:bg-red-50"
+                      >
+                        삭제
+                      </button>
+                    </>
+                  )}
+                </div>
+                {presetsError && (
+                  <span className="text-[11px] text-red-600">
+                    프리셋 목록을 불러오지 못했습니다.{" "}
+                    <button
+                      type="button"
+                      onClick={() => void loadPresets()}
+                      className="font-semibold underline hover:no-underline"
+                    >
+                      다시 시도
+                    </button>
+                  </span>
+                )}
+                {!presetsLoading && !presetsError && presets.length === 0 && (
+                  <span className="text-[11px] text-ink-500">
+                    저장된 프리셋이 없습니다. 아래에서 현재 설정을 프리셋으로 저장할 수 있습니다.
+                  </span>
                 )}
               </div>
-            </div>
-            
-            <div className="border-t border-line border-dashed my-1"></div>
 
-            <div className="grid gap-1.5">
-              <span className="text-xs font-bold text-ink-700">현재 설정을 프리셋으로 저장</span>
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  value={presetName}
-                  onChange={(event) => setPresetName(event.target.value)}
-                  placeholder="예: IT 및 AI 뉴스 수집"
-                  className="w-full rounded-md border border-line bg-white px-3 py-1.5 text-xs"
-                />
-                <button
-                  type="button"
-                  disabled={savingPreset}
-                  onClick={handleSavePreset}
-                  className="whitespace-nowrap rounded-md bg-ink-800 text-white px-4 py-1.5 text-xs font-semibold hover:bg-ink-900 disabled:opacity-50"
-                >
-                  {savingPreset ? "저장 중..." : "프리셋 저장"}
-                </button>
+              <div className="border-t border-line border-dashed my-1"></div>
+
+              <div className="grid gap-1.5">
+                <span className="text-xs font-bold text-ink-700">현재 설정을 새 프리셋으로 저장</span>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={presetName}
+                    onChange={(event) => setPresetName(event.target.value)}
+                    placeholder="예: IT 및 AI 뉴스 수집"
+                    className="min-w-0 flex-1 rounded-md border border-line bg-white px-3 py-1.5 text-xs"
+                  />
+                  <button
+                    type="button"
+                    disabled={savingPreset || !presetName.trim()}
+                    onClick={handleSavePreset}
+                    className="whitespace-nowrap rounded-md bg-ink-800 text-white px-4 py-1.5 text-xs font-semibold hover:bg-ink-900 disabled:opacity-50"
+                  >
+                    {savingPreset ? "저장 중..." : "새 프리셋 저장"}
+                  </button>
+                </div>
               </div>
             </div>
           </div>
-        </div>
+        )}
 
         <div className="mt-5 grid gap-4">
           <label className="grid gap-1 text-sm">
@@ -1089,6 +1126,13 @@ export function ManualFetchManager(): JSX.Element {
                           >
                             {cancelingId === job.id ? "취소 중..." : "취소"}
                           </button>
+                        ) : job.status === "SUCCEEDED" ? (
+                          <a
+                            href={`/articles?fetchJobId=${job.id}`}
+                            className="rounded-md border border-line px-2.5 py-1 font-semibold text-[#0f5f9f] hover:bg-slate-50"
+                          >
+                            기사 보기
+                          </a>
                         ) : (
                           <span className="text-ink-400">-</span>
                         )}

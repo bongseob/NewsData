@@ -28,6 +28,29 @@ export class FetchPresetsRepository {
     return result.insertId;
   }
 
+  async update(id: number, name: string, query: Record<string, unknown>): Promise<void> {
+    await this.db.execute(
+      `UPDATE fetch_presets
+       SET name = :name,
+           query = :query,
+           updated_at = CURRENT_TIMESTAMP(3)
+       WHERE id = :id`,
+      {
+        id,
+        name,
+        query: JSON.stringify(query)
+      }
+    );
+  }
+
+  async findById(id: number): Promise<FetchPresetRow | null> {
+    const [rows] = await this.db.execute<FetchPresetRow[]>(
+      `SELECT * FROM fetch_presets WHERE id = :id LIMIT 1`,
+      { id }
+    );
+    return rows[0] ?? null;
+  }
+
   async findAllBySource(source: string): Promise<FetchPresetRow[]> {
     const [rows] = await this.db.execute<FetchPresetRow[]>(
       `SELECT * FROM fetch_presets

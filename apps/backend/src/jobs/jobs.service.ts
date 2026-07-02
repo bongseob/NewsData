@@ -357,6 +357,27 @@ export class JobsService {
     return repository.create(name.trim(), source, normalizedQuery);
   }
 
+  async updatePreset(
+    id: number,
+    name: string,
+    query: Record<string, unknown>
+  ): Promise<void> {
+    if (!name || !name.trim()) {
+      throw new BadRequestException("Preset name is required.");
+    }
+    const repository = new FetchPresetsRepository(this.pool);
+    const preset = await repository.findById(id);
+    if (!preset) {
+      throw new NotFoundException("Preset not found.");
+    }
+
+    let normalizedQuery: any = query;
+    if (preset.source === ARTICLE_SOURCES.newsdata) {
+      normalizedQuery = this.normalizeNewsDataQuery(query);
+    }
+    await repository.update(id, name.trim(), normalizedQuery);
+  }
+
   async listPresets(source: string) {
     const repository = new FetchPresetsRepository(this.pool);
     return repository.findAllBySource(source);

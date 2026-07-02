@@ -33,6 +33,7 @@ export interface ArticleRow extends RowDataPacket {
   public_url: string | null;
   press_time: Date | null;
   raw_payload: unknown;
+  fetch_job_id: number | null;
   created_at: Date;
   updated_at: Date;
   thumbnail_local_path?: string | null;
@@ -73,6 +74,7 @@ export interface ListArticlesInput {
   reviewState?: ArticleReviewState;
   source?: ArticleSource;
   search?: string;
+  fetchJobId?: number;
   sort?: ArticleSortColumn;
   order?: ArticleSortOrder;
   limit?: number;
@@ -107,6 +109,7 @@ export interface UpsertArticleInput {
   sourceUrl?: string | null;
   pressTime?: Date | null;
   rawPayload: unknown;
+  fetchJobId?: number | null;
 }
 
 export class ArticlesRepository {
@@ -196,7 +199,8 @@ export class ArticlesRepository {
         country,
         source_url,
         press_time,
-        raw_payload
+        raw_payload,
+        fetch_job_id
       ) VALUES (
         :source,
         :externalId,
@@ -217,7 +221,8 @@ export class ArticlesRepository {
         :country,
         :sourceUrl,
         :pressTime,
-        :rawPayload
+        :rawPayload,
+        :fetchJobId
       )
       ON DUPLICATE KEY UPDATE
         status = VALUES(status),
@@ -238,6 +243,8 @@ export class ArticlesRepository {
         source_url = VALUES(source_url),
         press_time = VALUES(press_time),
         raw_payload = VALUES(raw_payload),
+        -- 최초 수집 요청을 보존한다: 기존 값이 있으면 유지, 없을 때만 채운다.
+        fetch_job_id = COALESCE(fetch_job_id, VALUES(fetch_job_id)),
         updated_at = CURRENT_TIMESTAMP(3)`,
       {
         source: input.source,
@@ -259,7 +266,8 @@ export class ArticlesRepository {
         country: input.country ?? null,
         sourceUrl: input.sourceUrl ?? null,
         pressTime: input.pressTime ?? null,
-        rawPayload: JSON.stringify(input.rawPayload)
+        rawPayload: JSON.stringify(input.rawPayload),
+        fetchJobId: input.fetchJobId ?? null
       }
     );
 
@@ -296,6 +304,11 @@ export class ArticlesRepository {
     if (input.source) {
       where.push("a.source = :source");
       params.source = input.source;
+    }
+
+    if (input.fetchJobId) {
+      where.push("a.fetch_job_id = :fetchJobId");
+      params.fetchJobId = input.fetchJobId;
     }
 
     if (input.search) {

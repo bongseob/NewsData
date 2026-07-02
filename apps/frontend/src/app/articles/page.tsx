@@ -33,7 +33,8 @@ async function getArticles(
   source: string,
   sort: BoardSortColumn,
   order: string,
-  offset: number
+  offset: number,
+  fetchJobId?: number
 ): Promise<ArticlesResponse> {
   const params = new URLSearchParams(TAB_QUERY[tab]);
   params.set("limit", String(PAGE_SIZE));
@@ -43,6 +44,9 @@ async function getArticles(
   }
   if (source) {
     params.set("source", source);
+  }
+  if (fetchJobId) {
+    params.set("fetchJobId", String(fetchJobId));
   }
   if (sort) {
     params.set("sort", sort);
@@ -122,6 +126,7 @@ export default async function ArticlesPage({
     source?: string;
     sort?: string;
     order?: string;
+    fetchJobId?: string;
   };
 }): Promise<JSX.Element> {
   const tab: BoardTab = VALID_TABS.includes(searchParams.tab as BoardTab)
@@ -141,6 +146,10 @@ export default async function ArticlesPage({
     : "desc";
   const page = Math.max(Number(searchParams.page ?? "1") || 1, 1);
   const offset = (page - 1) * PAGE_SIZE;
+  const fetchJobId =
+    searchParams.fetchJobId && Number(searchParams.fetchJobId) > 0
+      ? Number(searchParams.fetchJobId)
+      : undefined;
 
   const { items, total } = await getArticles(
     tab,
@@ -148,7 +157,8 @@ export default async function ArticlesPage({
     source,
     sort,
     order,
-    offset
+    offset,
+    fetchJobId
   );
 
   const reviewCounts = await getReviewCounts();
@@ -167,6 +177,7 @@ export default async function ArticlesPage({
           source={source}
           sort={sort}
           order={order}
+          fetchJobId={fetchJobId}
           reviewCounts={reviewCounts}
         />
       </div>

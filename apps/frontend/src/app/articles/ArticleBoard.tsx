@@ -25,6 +25,7 @@ export interface BoardArticle {
   thumbnail_local_path?: string | null;
   thumbnail_source_url?: string | null;
   thumbnail_is_generated?: number | boolean | null;
+  fetch_job_id?: number | null;
 }
 
 export type BoardSortColumn = "updated_at" | "created_at" | "press_time";
@@ -48,6 +49,7 @@ interface ArticleBoardProps {
   source: string;
   sort: BoardSortColumn;
   order: string;
+  fetchJobId?: number;
   reviewCounts?: ReviewCounts;
 }
 
@@ -136,6 +138,7 @@ export function ArticleBoard({
   source,
   sort,
   order,
+  fetchJobId,
   reviewCounts
 }: ArticleBoardProps): JSX.Element {
   const router = useRouter();
@@ -173,6 +176,7 @@ export function ArticleBoard({
       sort,
       order,
       page: String(page),
+      fetchJobId: fetchJobId ? String(fetchJobId) : undefined,
       ...overrides
     };
     const params = new URLSearchParams();
@@ -182,6 +186,7 @@ export function ArticleBoard({
     if (merged.sort && merged.sort !== "updated_at") params.set("sort", merged.sort);
     if (merged.order && merged.order !== "desc") params.set("order", merged.order);
     if (merged.page && merged.page !== "1") params.set("page", merged.page);
+    if (merged.fetchJobId) params.set("fetchJobId", merged.fetchJobId);
     return params;
   };
 
@@ -218,6 +223,12 @@ export function ArticleBoard({
 
   const goPage = (target: number) => {
     router.push(`/articles?${buildParams({ page: String(target) }).toString()}`);
+  };
+
+  const clearFetchJobFilter = () => {
+    const params = buildParams({ page: "1" });
+    params.delete("fetchJobId");
+    router.push(`/articles?${params.toString()}`);
   };
 
   const runAction = async (action: BulkAction) => {
@@ -279,7 +290,7 @@ export function ArticleBoard({
   };
 
   return (
-    <section className="px-5 py-6 sm:px-8 lg:px-10">
+    <section className="min-w-0 px-5 py-6 sm:px-8 lg:px-10">
       <header className="mb-5 border-b border-line pb-5">
         <p className="text-sm font-medium text-ink-500">수집 → 선별 → 번역 → 발행 대상</p>
         <h2 className="mt-1 text-2xl font-bold sm:text-3xl">기사 큐레이션</h2>
@@ -370,6 +381,21 @@ export function ArticleBoard({
         </div>
       </div>
 
+      {fetchJobId && (
+        <div className="mb-4 flex items-center justify-between gap-3 rounded-md border border-blue-200 bg-blue-50 px-4 py-2 text-sm text-blue-800">
+          <span>
+            수집 작업 <strong>#{fetchJobId}</strong> 에서 수집된 기사만 표시 중입니다.
+          </span>
+          <button
+            type="button"
+            onClick={clearFetchJobFilter}
+            className="whitespace-nowrap text-xs font-semibold underline hover:no-underline"
+          >
+            필터 해제
+          </button>
+        </div>
+      )}
+
       {tab === "selected" && reviewCounts && reviewCounts.selected > 0 && (
         <div className="mb-3 flex items-center gap-3 rounded-md bg-blue-50 px-4 py-2 text-xs text-blue-700">
           <span className="font-semibold">번역 현황</span>
@@ -401,8 +427,8 @@ export function ArticleBoard({
         </div>
       )}
 
-      <div className="overflow-hidden rounded-lg border border-line bg-white shadow-panel">
-        <table className="w-full text-left text-sm">
+      <div className="overflow-x-auto rounded-lg border border-line bg-white shadow-panel">
+        <table className="w-full min-w-[720px] text-left text-sm">
           <thead className="border-b border-line bg-slate-50 text-xs uppercase text-ink-500">
             <tr>
               <th className="px-4 py-3">
@@ -418,6 +444,7 @@ export function ArticleBoard({
               <th className="px-4 py-3 font-semibold">국가</th>
               <th className="px-4 py-3 font-semibold">번역</th>
               <th className="px-4 py-3 font-semibold">출처</th>
+              <th className="px-4 py-3 font-semibold">수집</th>
               <th className="px-4 py-3 font-semibold">발표 시간</th>
               <th className="px-4 py-3 font-semibold">수정 시간</th>
             </tr>
@@ -425,7 +452,7 @@ export function ArticleBoard({
           <tbody className="divide-y divide-line">
             {items.length === 0 ? (
               <tr>
-                <td colSpan={8} className="px-4 py-10 text-center text-sm text-ink-500">
+                <td colSpan={9} className="px-4 py-10 text-center text-sm text-ink-500">
                   해당 단계의 기사가 없습니다.
                 </td>
               </tr>
@@ -469,9 +496,9 @@ export function ArticleBoard({
                       <p className="break-words whitespace-normal leading-relaxed text-sm">{article.title}</p>
                     </Link>
                   </td>
-                  <td className="whitespace-nowrap px-4 py-3">
+                  <td className="max-w-[8rem] px-4 py-3">
                     {article.country ? (
-                      <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-ink-700">
+                      <span className="inline-block whitespace-normal break-words rounded-md bg-slate-100 px-2 py-0.5 text-xs font-medium text-ink-700">
                         {article.country}
                       </span>
                     ) : (
@@ -491,6 +518,22 @@ export function ArticleBoard({
                   </td>
                   <td className="whitespace-nowrap px-4 py-3 text-xs text-ink-500">
                     {article.publisher_credit || "N/A"}
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-3 text-xs">
+                    {article.fetch_job_id ? (
+                      <Link
+                        href={`/articles?${buildParams({
+                          fetchJobId: String(article.fetch_job_id),
+                          page: "1"
+                        }).toString()}`}
+                        className="rounded-full bg-slate-100 px-2 py-0.5 font-semibold text-[#0f5f9f] hover:bg-slate-200"
+                        title="이 수집 작업의 기사만 보기"
+                      >
+                        #{article.fetch_job_id}
+                      </Link>
+                    ) : (
+                      <span className="text-ink-300">-</span>
+                    )}
                   </td>
                   <td className="whitespace-nowrap px-4 py-3 text-xs text-ink-500">
                     {article.press_time
