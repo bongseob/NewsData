@@ -73,6 +73,17 @@ const fallbackStatusStyle: StatusStyle = {
   badge: "bg-slate-100 text-ink-500"
 };
 
+// 대시보드에 노출할 상태. 실제 워크플로에서 값이 채워지는 상태만 표시한다.
+// EMBARGOED / DELETED 는 각각 press_time 기반 엠바고 스케줄러, 뉴스와이어 delete
+// 연동이 아직 없어 항상 0이므로 제외한다. (해당 기능 도입 시 다시 추가)
+const DASHBOARD_STATUSES: string[] = [
+  ARTICLE_STATUSES.draft,
+  ARTICLE_STATUSES.readyToPublish,
+  ARTICLE_STATUSES.publishing,
+  ARTICLE_STATUSES.published,
+  ARTICLE_STATUSES.failed
+];
+
 async function getArticles() {
   try {
     const res = await fetch(`${API_BASE}/articles?limit=10`, {
@@ -128,30 +139,23 @@ export default async function HomePage(): Promise<JSX.Element> {
             </div>
           </header>
 
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-            {Object.values(ARTICLE_STATUSES).map((status) => {
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+            {DASHBOARD_STATUSES.map((status) => {
               const style = statusStyles[status] ?? fallbackStatusStyle;
               return (
                 <article
-                  className={`rounded-lg border border-line border-t-4 ${style.accent} bg-gradient-to-b ${style.tint} to-white p-5 shadow-panel transition hover:-translate-y-0.5 hover:shadow-md`}
+                  className={`rounded-lg border border-line border-t-4 ${style.accent} bg-gradient-to-b ${style.tint} to-white px-4 py-3 shadow-panel transition hover:-translate-y-0.5 hover:shadow-md`}
                   key={status}
                 >
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <p className="text-sm font-semibold text-ink-700">
-                        {statusLabels[status] ?? status}
-                      </p>
-                      <p className="mt-1 text-xs font-medium text-slate-400">
-                        {status}
-                      </p>
-                    </div>
-                    <span
-                      className={`rounded-full px-2.5 py-1 text-xs font-semibold ${style.badge}`}
-                    >
-                      {countsMap[status] ?? 0}건
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-sm font-semibold text-ink-700">
+                      {statusLabels[status] ?? status}
+                    </p>
+                    <span className="text-[10px] font-medium text-slate-400">
+                      {status}
                     </span>
                   </div>
-                  <strong className={`mt-5 block text-3xl font-bold ${style.value}`}>
+                  <strong className={`mt-1 block text-2xl font-bold ${style.value}`}>
                     {countsMap[status] ?? 0}
                   </strong>
                 </article>
