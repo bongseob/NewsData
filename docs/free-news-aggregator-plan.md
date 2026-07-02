@@ -169,7 +169,8 @@
 - [!] 저작권 소스 요약 발행 시 이미지 정책: 원문 썸네일 대신 자체 생성 이미지(이미 워터마크/AI 이미지 기능 있음)만 사용할지.
 - [!] `LICENSED` 요약 길이/형식(현행 AI 3문장 요약 재사용 여부).
 - [!] Guardian 무료 키 발급 및 `.env` 관리(`GUARDIAN_API_KEY`).
-- [!] SEC EDGAR User-Agent 문자열(연락처 포함) 확정.
+- [x] SEC User-Agent 문자열: `DailyMaker News Bot dmaker3015@gmail.com` (연락처 포함, SEC 요구사항 충족).
+- [x] SEC 수집 범위: **press-release RSS만** (EDGAR 파일링은 후속).
 
 ---
 
@@ -177,3 +178,75 @@
 
 **Phase 0(어댑터 리팩터) + Phase 1(뉴스와이어 제거) + Phase 2(SEC·Fed)**.
 여기서 어댑터·RSS·발행 정책 분기·dedup의 뼈대가 완성되면, 이후 소스(GDELT/Guardian/BBC/NPR)는 어댑터 파일 추가로 확장된다.
+
+---
+
+## 8. 착수 스프린트 상세 (Phase 0 → 1 → 2)
+
+파일 단위 작업 정의. 커밋 경계는 작은 단위로 나눈다.
+
+### Phase 0 — 어댑터 추상화 (코드만, 기능 동등)
+
+**목표**: fetch/process 워커의 NewsData 하드코딩 제거. 소스별 어댑터가 `NormalizedArticle[]` 생성. 결과물은 현재와 동일.
+
+신규 `packages/shared/src/normalized-article.ts`:
+```ts
+export type LicensePolicy = "PUBLIC_DOMAIN" | "LICENSED";
+export interface NormalizedArticle {
+  source: ArticleSource; externalId: string; title: string;
+  summary: string | null; body: string | null;
+  url: string; canonicalUrl: string;
+  publisher: string | null; pressTime: Date | null;
+  language: string | null; country: string | null;
+  imageUrl: string | null; keywords: string[] | null;
+  licensePolicy: LicensePolicy; rawPayload: unknown;
+}
+export interface ProcessArticleJobData { article: NormalizedArticle; fetchJobId: number; }
+```
+
+신규 `apps/worker/src/sources/`:
+- `types.ts` — `SourceAdapter { source; licensePolicy; fetch(config): Promise<NormalizedArticle[]> }`, `SourceFetchConfig = { query: Record<string, unknown> }`
+- `registry.ts` — `SOURCE_ADAPTERS: Partial<Record<ArticleSource, SourceAdapter>>`
+- `newsdata.ts` — 현 `register-fetch-worker`의 `buildNewsDataUrl`·페이지네이션 + `register-process-worker`(82-153행)의 필드 추출을 이관. `licensePolicy = "LICENSED"`.
+
+수정:
+- `register-fetch-worker.ts` → 제네릭: `SOURCE_ADAPTERS[source].fetch()` → 항목별 `{ article, fetchJobId }` process 큐 enqueue. fetch_jobs 상태전이·dedup 카운트 유지.
+- `register-process-worker.ts` → 제네릭: `{ article, fetchJobId }` 수신 → `body = article.body ?? crawlArticle(article.url)` → 제목 번역 → `upsertCollectedArticle` → 썸네일(`article.imageUrl`, 워터마크 `article.publisher`). 소스 분기 제거.
+
+커밋 경계: (1) shared 타입 (2) sources 스캐폴드+newsdata 어댑터 (3) fetch 제네릭화 (4) process 제네릭화
+검증: NewsData 수동 수집 1건 파리티(제목번역/썸네일·워터마크/본문 크롤). 4개 패키지 typecheck.
+주의: process 잡 데이터(`articleData`→`article`) 파괴적 변경 → 로컬 Redis 큐 비우고 워커 재시작.
+
+### Phase 1 — 뉴스와이어 제거
+
+수정:
+- `packages/shared/src/sources.ts` — `newswire`, `NEWSWIRE_ACTIONS`, `NewswireAction` 제거
+- 프런트: `ManualFetchManager`(탭/`sourceParam`), `ArticleBoard`(SOURCE_OPTIONS), `articles/page`(VALID_SOURCES), `settings/SourceConfigManager`(옵션)
+- 문서: `prd.md`·`PROJECT_RULES.md` 뉴스와이어 규칙 정리
+남김: `callback` 큐/워커(빈 스텁, 범용), `DELETED` enum(대시보드엔 이미 없음)
+커밋 경계: (1) shared enum (2) 프런트 UI (3) 문서
+검증: typecheck, 뉴스와이어 탭 제거, NewsData 흐름 정상.
+
+### Phase 2 — 정부 피드 (SEC · Fed)
+
+의존성: `apps/worker`에 `rss-parser` 추가.
+
+신규 `apps/worker/src/sources/`:
+- `rss-base.ts` — 피드 URL 배열 fetch+parse(User-Agent 세팅) → item → `NormalizedArticle`(매퍼 주입)
+- `sec.ts` — User-Agent `DailyMaker News Bot dmaker3015@gmail.com`, **press-release RSS만**, `licensePolicy = "PUBLIC_DOMAIN"`
+- `fed.ts` — `press_all.xml`, `licensePolicy = "PUBLIC_DOMAIN"`
+- `registry.ts` 등록, `sources.ts`에 `sec`,`fed` 추가. 피드 URL은 `source_configs.query`에서 로드.
+
+DB — 마이그레이션 008:
+- `articles.license_policy VARCHAR(16) NULL`, `articles.canonical_url VARCHAR(1000) NULL` + `canonical_url` 인덱스
+- `upsertCollectedArticle`에 두 필드 추가(매 수집 갱신)
+
+백엔드:
+- `jobs.service.ts`(231·298행) 소스 제한 완화 → newsdata/sec/fed 허용. 비-NewsData는 `normalizeNewsDataQuery` 건너뛰고 소스별 간단 검증.
+
+프런트:
+- `ManualFetchManager` 소스 탭에 SEC·Fed 추가. 키워드 폼 대신 "수집 실행"(피드 기반), 2단계 prepared→submit 재사용.
+
+커밋 경계: (1) rss-base+dep (2) sec/fed 어댑터+enum (3) 마이그 008+repo (4) 백엔드 소스 제한 완화 (5) 프런트 탭
+검증: SEC·Fed 수동 수집 → 기사 생성, `license_policy=PUBLIC_DOMAIN`, 본문 크롤·번역 확인. 마이그레이션 적용.
+범위 밖(후속): 교차 소스 dedup 실제 억제(Phase 5), 요약+링크 발행 모드(Phase 3에서 GDELT/Guardian과 함께).
