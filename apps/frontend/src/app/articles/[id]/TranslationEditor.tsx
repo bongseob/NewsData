@@ -47,7 +47,7 @@ export function TranslationEditor({
   const parseKeywords = (): string[] =>
     keywords
       .split(",")
-      .map((keyword) => keyword.trim())
+      .map((keyword) => keyword.replace(/\s+/g, "_").trim())
       .filter((keyword) => keyword.length > 0)
       .slice(0, 20);
 

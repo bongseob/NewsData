@@ -140,4 +140,20 @@ export class FetchJobsRepository {
       }
     );
   }
+
+  async updatePayload(
+    id: number,
+    requestPayload: unknown
+  ): Promise<void> {
+    await this.db.execute(
+      `UPDATE fetch_jobs
+       SET request_payload = :requestPayload,
+           updated_at = CURRENT_TIMESTAMP(3)
+       WHERE id = :id`,
+      {
+        id,
+        requestPayload: requestPayload ? JSON.stringify(requestPayload) : null
+      }
+    );
+  }
 }

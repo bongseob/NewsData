@@ -38,6 +38,8 @@ export interface ArticleRow extends RowDataPacket {
   thumbnail_local_path?: string | null;
   thumbnail_source_url?: string | null;
   thumbnail_is_generated?: number;
+  translated_summary?: string | null;
+  seo_keywords?: string[] | string | null;
 }
 
 export interface ArticleStatusCountRow extends RowDataPacket {
@@ -398,15 +400,25 @@ export class ArticlesRepository {
   async updateBodyTranslation(
     id: number,
     translatedBody: string,
-    translatedAt: Date
+    translatedAt: Date,
+    translatedSummary: string | null = null,
+    seoKeywords: string[] | null = null
   ): Promise<void> {
     await this.db.execute(
       `UPDATE articles
        SET translated_body = :translatedBody,
            body_translated_at = :translatedAt,
+           translated_summary = :translatedSummary,
+           seo_keywords = :seoKeywords,
            updated_at = CURRENT_TIMESTAMP(3)
        WHERE id = :id`,
-      { id, translatedBody, translatedAt }
+      {
+        id,
+        translatedBody,
+        translatedAt,
+        translatedSummary,
+        seoKeywords: seoKeywords ? JSON.stringify(seoKeywords) : null
+      }
     );
   }
 

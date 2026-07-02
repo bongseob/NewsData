@@ -6,7 +6,7 @@ import {
   type TranslateJobData
 } from "@newsdata/shared";
 import { ArticlesRepository, createMysqlPool } from "@newsdata/db";
-import { translateToKorean } from "../translate/openai.js";
+import { translateToKorean, generateSummaryAndSEO } from "../translate/openai.js";
 
 const pool = createMysqlPool({
   host: process.env.MYSQL_HOST || "localhost",
@@ -51,10 +51,23 @@ export function registerTranslateWorker(
         article.source_url
       );
 
+      // 본문 번역 결과를 활용해 요약 및 SEO 키워드 동시 생성
+      console.log(`[Translate] Generating AI Summary and SEO for article ${articleId}...`);
+      const aiResult = await generateSummaryAndSEO(translatedBody).catch((err) => {
+        console.error(
+          `[Translate] Failed to generate AI summary and SEO: ${
+            err instanceof Error ? err.message : "Unknown error"
+          }`
+        );
+        return null;
+      });
+
       await articlesRepo.updateBodyTranslation(
         articleId,
         attributedBody,
-        new Date()
+        new Date(),
+        aiResult?.summary || null,
+        aiResult?.keywords || null
       );
 
       console.log(`[Translate] body translated for article ${articleId}`);

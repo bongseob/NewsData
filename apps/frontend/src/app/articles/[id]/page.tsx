@@ -21,6 +21,7 @@ interface ArticleDetail {
   original_body: string | null;
   translated_title: string | null;
   translated_subtitle: string | null;
+  translated_summary: string | null;
   translated_body: string | null;
   title_translated_at: string | null;
   body_translated_at: string | null;
@@ -35,6 +36,7 @@ interface ArticleDetail {
   thumbnail_local_path?: string | null;
   thumbnail_source_url?: string | null;
   thumbnail_is_generated?: number | boolean | null;
+  seo_keywords?: string[] | string | null;
 }
 
 async function getArticle(id: string): Promise<ArticleDetail | null> {
@@ -65,19 +67,19 @@ function formatDate(value: string | null): string {
 
 function normalizeKeywords(value: string[] | string | null): string[] {
   if (Array.isArray(value)) {
-    return value.map((keyword) => String(keyword).trim()).filter(Boolean);
+    return value.map((keyword) => String(keyword).replace(/\s+/g, "_").trim()).filter(Boolean);
   }
 
   if (typeof value === "string") {
     try {
       const parsed = JSON.parse(value) as unknown;
       if (Array.isArray(parsed)) {
-        return parsed.map((keyword) => String(keyword).trim()).filter(Boolean);
+        return parsed.map((keyword) => String(keyword).replace(/\s+/g, "_").trim()).filter(Boolean);
       }
     } catch {
       return value
         .split(",")
-        .map((keyword) => keyword.trim())
+        .map((keyword) => keyword.replace(/\s+/g, "_").trim())
         .filter(Boolean);
     }
   }
@@ -111,7 +113,7 @@ export default async function ArticleDetailPage({
   const originalBody = article.original_body || article.body;
   const translatedBody = article.translated_body;
   const displayTitle = article.translated_title || article.title;
-  const keywords = normalizeKeywords(article.keywords);
+  const keywords = normalizeKeywords(article.seo_keywords || article.keywords);
 
   return (
     <main className="min-h-screen bg-[#f4f6f8] text-ink-950">
@@ -222,7 +224,7 @@ export default async function ArticleDetailPage({
                 <TranslationEditor
                   articleId={article.id}
                   initialTitle={article.translated_title ?? ""}
-                  initialSubtitle={article.translated_subtitle ?? ""}
+                  initialSubtitle={article.translated_summary || article.translated_subtitle || ""}
                   initialBody={translatedBody ?? ""}
                   initialKeywords={keywords}
                 />

@@ -1,0 +1,9 @@
+-- 수집 프리셋을 저장할 신규 테이블 fetch_presets 생성
+CREATE TABLE IF NOT EXISTS fetch_presets (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  name VARCHAR(255) NOT NULL COMMENT '프리셋 이름',
+  source VARCHAR(50) NOT NULL COMMENT '수집 소스 (NEWSDATA 등)',
+  query JSON NOT NULL COMMENT '수집 파라미터 쿼리 데이터',
+  created_at TIMESTAMP(3) DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at TIMESTAMP(3) DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

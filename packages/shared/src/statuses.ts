@@ -20,6 +20,7 @@ export type ArticleReviewState =
   (typeof ARTICLE_REVIEW_STATES)[keyof typeof ARTICLE_REVIEW_STATES];
 
 export const JOB_STATUSES = {
+  prepared: "PREPARED",
   pending: "PENDING",
   running: "RUNNING",
   succeeded: "SUCCEEDED",

@@ -167,11 +167,43 @@ export function registerProcessWorker(
           });
           const buffer = Buffer.from(imageRes.data, "binary");
 
-          const resizedBuffer = await sharp(buffer)
+          const resizedImage = sharp(buffer)
             .resize(800, 600, {
               fit: "inside",
               withoutEnlargement: true
-            })
+            });
+
+          const metadata = await resizedImage.metadata();
+          const width = metadata.width || 800;
+          const height = metadata.height || 600;
+
+          // 이미지 높이의 8% 정도로 바 높이 설정 (최소 30px)
+          const barHeight = Math.max(Math.round(height * 0.08), 30);
+          const fontSize = Math.max(Math.round(barHeight * 0.5), 12);
+          const watermarkText = `출처: ${publisherCredit || "NewsData.io"}`;
+
+          // XML 이스케이프 처리
+          const escapedText = watermarkText
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&apos;");
+
+          const svgOverlay = `
+            <svg width="${width}" height="${height}">
+              <rect x="0" y="${height - barHeight}" width="${width}" height="${barHeight}" fill="rgba(0, 0, 0, 0.5)" />
+              <text x="${width - 15}" y="${height - (barHeight / 2) + (fontSize / 3.5)}" 
+                    font-family="Sans-Serif, Arial" 
+                    font-size="${fontSize}" 
+                    fill="white" 
+                    text-anchor="end" 
+                    font-weight="bold">${escapedText}</text>
+            </svg>
+          `;
+
+          const resizedBuffer = await resizedImage
+            .composite([{ input: Buffer.from(svgOverlay), top: 0, left: 0 }])
             .jpeg({ quality: 80 })
             .toBuffer();
 

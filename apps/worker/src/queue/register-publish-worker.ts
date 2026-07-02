@@ -47,6 +47,9 @@ function getArticleTitle(article: ArticleRow): string {
 }
 
 function getArticleSubtitle(article: ArticleRow): string | null {
+  if (article.translated_summary) {
+    return article.translated_summary;
+  }
   if (article.translated_subtitle) {
     return article.translated_subtitle;
   }
@@ -394,6 +397,40 @@ export function registerPublishWorker(connection: ConnectionOptions): Worker {
         // 로그인 실패 시 로그인 폼(#user_id)이 그대로 남으므로 검증한다.
         if ((await page.locator("#user_id").count()) > 0) {
           throw new Error("Login failed: still on the admin login form after submit.");
+        }
+
+        // [중복 발행 방지 및 자가 치유]
+        // 어드민 기사 목록 첫 페이지에서 동일한 제목이 이미 존재하는지 검증한다.
+        const articleTitle = getArticleTitle(article);
+        console.log(`[Publish] Checking for pre-existing article with title "${articleTitle}"...`);
+        const listUrl = "https://www.d-maker.kr/news/adminArticleListForm.html";
+        await page.goto(listUrl, { waitUntil: "networkidle" }).catch(() => undefined);
+        const listContent = await page.content();
+
+        if (listContent.includes(articleTitle)) {
+          console.log(`[Publish] Found matching title in list page. Extracting idxno for self-healing...`);
+          const escapedTitle = articleTitle.replace(/[-\/\\^$*+?.()|[\]{}]/g, "\\$&");
+          // 앵커 태그 내부나 주변 쿼리에서 idxno 파싱 시도
+          const patternBefore = new RegExp(`href=["'][^"']*idxno=(\\d+)[^"']*["'][^>]*>[\\s\\S]*?${escapedTitle}`, "i");
+          const patternAfter = new RegExp(`${escapedTitle}[\\s\\S]*?idxno=(\\d+)`, "i");
+          
+          const matchIdxno = listContent.match(patternBefore)?.[1] || listContent.match(patternAfter)?.[1];
+          if (matchIdxno) {
+            console.log(`[Publish] Self-healing: Article already published with idxno ${matchIdxno}.`);
+            const publicUrl = getPublicArticleUrl(matchIdxno);
+            
+            await publishLogsRepo.create({
+              publishJobId,
+              articleId,
+              status: JOB_STATUSES.succeeded,
+              idxno: matchIdxno,
+              publicUrl,
+              currentUrl: page.url()
+            });
+            await publishJobsRepo.updateStatus(publishJobId, JOB_STATUSES.succeeded);
+            await articlesRepo.updatePublished(articleId, publicUrl);
+            return { articleId, publishJobId, idxno: matchIdxno, publicUrl };
+          }
         }
 
         failedStep = PUBLISH_FAILED_STEPS.openForm;

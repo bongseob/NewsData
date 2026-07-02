@@ -466,7 +466,7 @@ export function ArticleBoard({
                       href={`/articles/${article.id}`}
                       className="font-semibold text-[#0f5f9f] hover:underline"
                     >
-                      <p className="truncate">{article.title}</p>
+                      <p className="break-words whitespace-normal leading-relaxed text-sm">{article.title}</p>
                     </Link>
                   </td>
                   <td className="whitespace-nowrap px-4 py-3">

@@ -7,3 +7,4 @@ export * from "./repositories/failure-artifacts.repository.js";
 export * from "./repositories/publish-jobs.repository.js";
 export * from "./repositories/publish-logs.repository.js";
 export * from "./repositories/source-configs.repository.js";
+export * from "./repositories/fetch-presets.repository.js";

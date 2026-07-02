@@ -1,11 +1,13 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Inject,
   NotFoundException,
   Param,
   ParseIntPipe,
+  Patch,
   Post,
   Query
 } from "@nestjs/common";
@@ -53,5 +55,33 @@ export class JobsController {
   @Post("fetch/:id/cancel")
   cancelFetchJob(@Param("id", ParseIntPipe) id: number) {
     return this.jobsService.cancelFetchJob(id);
+  }
+
+  @Post("presets")
+  createPreset(@Body() body: { name: string; source: string; query: Record<string, unknown> }) {
+    return this.jobsService.createPreset(body.name, body.source, body.query);
+  }
+
+  @Get("presets")
+  listPresets(@Query("source") source: string) {
+    return this.jobsService.listPresets(source);
+  }
+
+  @Delete("presets/:id")
+  deletePreset(@Param("id", ParseIntPipe) id: number) {
+    return this.jobsService.deletePreset(id);
+  }
+
+  @Patch("fetch/:id")
+  updateFetchJob(
+    @Param("id", ParseIntPipe) id: number,
+    @Body() body: { query: Record<string, unknown> }
+  ) {
+    return this.jobsService.updateFetchJob(id, body.query);
+  }
+
+  @Post("fetch/:id/submit")
+  submitFetchJob(@Param("id", ParseIntPipe) id: number) {
+    return this.jobsService.submitFetchJob(id);
   }
 }

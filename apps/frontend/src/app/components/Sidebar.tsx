@@ -5,7 +5,6 @@ const navItems = [
   { label: "수집 설정", href: "/settings" },
   { label: "수동 수집", href: "/manual-fetch" },
   { label: "기사 큐레이션", href: "/articles" },
-  { label: "Draft 목록", href: "/drafts", child: true },
   { label: "발행 요청", href: "/publish-requests" },
   { label: "Queue 상태", href: "/queues" },
   { label: "실패 로그", href: "/failure-logs" }
@@ -27,7 +26,7 @@ export function Sidebar({ active }: { active: string }): JSX.Element {
               item.label === active
                 ? "bg-[#e8f1fb] text-[#0f5f9f]"
                 : "text-ink-700 hover:bg-slate-100"
-            } ${item.child ? "lg:ml-4 lg:text-xs" : ""}`}
+            }`}
             href={item.href}
             key={item.label}
           >

@@ -7,6 +7,7 @@ import {
 import { Queue } from "bullmq";
 import {
   FetchJobsRepository,
+  FetchPresetsRepository,
   type FetchJobRow,
   type MysqlPool
 } from "@newsdata/db";
@@ -235,31 +236,62 @@ export class JobsService {
     const fetchJobId = await new FetchJobsRepository(this.pool).create({
       source: input.source,
       triggerType: JOB_TRIGGER_TYPES.manual,
-      status: JOB_STATUSES.pending,
+      status: JOB_STATUSES.prepared,
       requestPayload: query
     });
-
-    const queueJobId = `fetch-${fetchJobId}`;
-    await this.fetchQueue.add(
-      "manual-fetch",
-      {
-        fetchJobId,
-        source: input.source,
-        query
-      },
-      {
-        jobId: queueJobId
-      }
-    );
 
     return {
       accepted: true,
       queue: QUEUE_NAMES.fetch,
       fetchJobId,
-      queueJobId,
+      queueJobId: `fetch-${fetchJobId}`,
       source: input.source,
       query
     };
+  }
+
+  async updateFetchJob(id: number, query: Record<string, unknown>): Promise<void> {
+    const repository = new FetchJobsRepository(this.pool);
+    const fetchJob = await repository.findById(id);
+    if (!fetchJob) {
+      throw new NotFoundException("Fetch job not found.");
+    }
+
+    if (fetchJob.status !== JOB_STATUSES.prepared) {
+      throw new BadRequestException("Only prepared fetch jobs can be updated.");
+    }
+
+    const normalizedQuery = this.normalizeNewsDataQuery(query);
+    await repository.updatePayload(id, normalizedQuery);
+  }
+
+  async submitFetchJob(id: number): Promise<void> {
+    const repository = new FetchJobsRepository(this.pool);
+    const fetchJob = await repository.findById(id);
+    if (!fetchJob) {
+      throw new NotFoundException("Fetch job not found.");
+    }
+
+    if (fetchJob.status !== JOB_STATUSES.prepared) {
+      throw new BadRequestException("Only prepared fetch jobs can be submitted to the queue.");
+    }
+
+    // 상태를 pending으로 갱신
+    await repository.updateStatus(id, JOB_STATUSES.pending);
+
+    // BullMQ 큐에 작업 추가
+    const queueJobId = `fetch-${id}`;
+    await this.fetchQueue.add(
+      "manual-fetch",
+      {
+        fetchJobId: id,
+        source: fetchJob.source,
+        query: fetchJob.request_payload
+      },
+      {
+        jobId: queueJobId
+      }
+    );
   }
 
   async listFetchJobs(input: ListFetchJobsRequest): Promise<{ items: FetchJobRow[]; total: number }> {
@@ -311,5 +343,27 @@ export class JobsService {
       fetchJobId: id,
       status: JOB_STATUSES.canceled
     };
+  }
+
+  async createPreset(name: string, source: string, query: Record<string, unknown>): Promise<number> {
+    if (!name || !name.trim()) {
+      throw new BadRequestException("Preset name is required.");
+    }
+    let normalizedQuery: any = {};
+    if (source === ARTICLE_SOURCES.newsdata) {
+      normalizedQuery = this.normalizeNewsDataQuery(query);
+    }
+    const repository = new FetchPresetsRepository(this.pool);
+    return repository.create(name.trim(), source, normalizedQuery);
+  }
+
+  async listPresets(source: string) {
+    const repository = new FetchPresetsRepository(this.pool);
+    return repository.findAllBySource(source);
+  }
+
+  async deletePreset(id: number): Promise<void> {
+    const repository = new FetchPresetsRepository(this.pool);
+    await repository.delete(id);
   }
 }
