@@ -87,6 +87,69 @@ export async function translateToKorean(
   }
 }
 
+// 번역 본문을 근거로 자체 문장의 새 기사를 작성한다(LICENSED 발행용).
+// 원문 표현·구성을 그대로 옮기지 않도록, 사실 위주로 재구성하게 지시한다.
+export async function generateRewrittenArticle(
+  translatedBody: string | null
+): Promise<string | null> {
+  if (!translatedBody) return null;
+
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) {
+    throw new Error("OPENAI_API_KEY is not set.");
+  }
+
+  const model =
+    process.env.OPENAI_TRANSLATION_MODEL ||
+    process.env.TEXT_GENERATION_MODEL ||
+    "gpt-4o-mini";
+  const endpoint =
+    process.env.OPENAI_CHAT_COMPLETIONS_URL ||
+    "https://api.openai.com/v1/chat/completions";
+
+  const res = await fetch(endpoint, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      model,
+      temperature: 0.5,
+      messages: [
+        {
+          role: "system",
+          content:
+            "You are a Korean news editor. Using ONLY the facts in the user's text, " +
+            "write an ORIGINAL Korean news article in your own words. " +
+            "Requirements: " +
+            "1) 3 to 5 paragraphs of natural Korean prose. " +
+            "2) Do NOT copy the source's sentence structure or wording; restructure and paraphrase. " +
+            "3) Report facts only; do not invent details, numbers, names, or quotes. " +
+            "4) If you must quote, keep it very short and inside quotation marks. " +
+            "5) Do not add a headline, byline, notes, or a source link. " +
+            "Output only the article body text."
+        },
+        { role: "user", content: translatedBody }
+      ]
+    })
+  });
+
+  const payload = (await res.json()) as OpenAIChatResponse;
+  if (!res.ok) {
+    throw new Error(
+      payload.error?.message || `Rewrite failed with status ${res.status}`
+    );
+  }
+
+  const rewritten = payload.choices?.[0]?.message?.content?.trim();
+  if (!rewritten) {
+    throw new Error("OpenAI response did not include rewritten article text.");
+  }
+
+  return rewritten;
+}
+
 export interface SummaryAndSEOResult {
   summary: string;
   keywords: string[];

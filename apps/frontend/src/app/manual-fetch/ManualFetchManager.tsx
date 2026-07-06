@@ -53,6 +53,85 @@ const statusLabels: Record<string, string> = {
 
 const MAX_COMMA_VALUES = 5;
 
+const RECENT_SEARCH_KEY_PREFIX = "manual-fetch:recent-search:";
+const MAX_RECENT_SEARCHES = 8;
+
+// GDELT는 5초당 1요청 제한이 있고 Reuters도 같은 엔드포인트를 공유한다.
+// 여유를 두어 큐 제출을 5초간 막는다.
+const GDELT_COOLDOWN_MS = 5000;
+
+// GDELT 계열(엔드포인트 공유) 여부.
+function isGdeltFamilySource(source: SourceTab): boolean {
+  return source === "gdelt" || source === "reuters";
+}
+
+// 워커가 GDELT rate limit(429)·차단으로 실패시킨 잡인지 판별.
+function isRateLimitError(message: string | null | undefined): boolean {
+  return !!message && (message.includes("rate limit") || message.includes("요청 제한"));
+}
+
+function recentSearchKey(sourceParam: string): string {
+  return `${RECENT_SEARCH_KEY_PREFIX}${sourceParam}`;
+}
+
+function readRecentSearches(sourceParam: string): string[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = window.localStorage.getItem(recentSearchKey(sourceParam));
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed)
+      ? parsed.filter((item): item is string => typeof item === "string")
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeRecentSearches(sourceParam: string, terms: string[]): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(recentSearchKey(sourceParam), JSON.stringify(terms));
+  } catch {
+    // 저장 실패(용량 초과·프라이빗 모드 등)는 조용히 무시한다.
+  }
+}
+
+// 최근 검색어 칩 목록. 클릭하면 검색어 입력을 채운다.
+function RecentSearches({
+  items,
+  onPick,
+  onClear
+}: {
+  items: string[];
+  onPick: (term: string) => void;
+  onClear: () => void;
+}): JSX.Element | null {
+  if (items.length === 0) return null;
+  return (
+    <div className="mt-2 flex flex-wrap items-center gap-1.5">
+      <span className="text-xs font-semibold text-ink-500">최근 검색어</span>
+      {items.map((term) => (
+        <button
+          key={term}
+          type="button"
+          onClick={() => onPick(term)}
+          className="rounded-full border border-line bg-slate-50 px-2.5 py-1 text-xs text-ink-700 hover:bg-slate-100"
+        >
+          {term}
+        </button>
+      ))}
+      <button
+        type="button"
+        onClick={onClear}
+        className="ml-1 text-xs font-semibold text-red-600 hover:underline"
+      >
+        지우기
+      </button>
+    </div>
+  );
+}
+
 function parseCommaValues(value: string): string[] {
   return value
     .split(",")
@@ -148,9 +227,17 @@ export function ManualFetchManager(): JSX.Element {
   const [keywordQ, setKeywordQ] = useState("");
   const [keywordCount, setKeywordCount] = useState("50");
 
+  // 소스별 최근 검색어 (localStorage 기반)
+  const [recentSearches, setRecentSearches] = useState<string[]>([]);
+
+  // GDELT/Reuters 큐 제출 쿨다운 (rate limit 예방). 쿨다운 종료 epoch(ms).
+  const [gdeltCooldownUntil, setGdeltCooldownUntil] = useState(0);
+  const [now, setNow] = useState(() => Date.now());
+
   // 수정 모드 관련 React 상태 추가
   const [editingJobId, setEditingJobId] = useState<number | null>(null);
   const [submittingSubmitId, setSubmittingSubmitId] = useState<number | null>(null);
+  const [retryingId, setRetryingId] = useState<number | null>(null);
 
   const countryString = useMemo(() => joinSelectedValues(countries), [countries]);
   const languageString = useMemo(() => joinSelectedValues(languages), [languages]);
@@ -274,11 +361,65 @@ export function ManualFetchManager(): JSX.Element {
         return;
       }
       setMessage(`작업 #${id}이(가) 수집 대기열(Queue)에 성공적으로 제출되었습니다.`);
+      // GDELT/Reuters는 5초당 1요청 제한 → 다음 큐 제출을 잠시 막는다.
+      if (isGdeltFamilySource(activeSource)) {
+        setGdeltCooldownUntil(Date.now() + GDELT_COOLDOWN_MS);
+      }
       await loadJobs();
     } catch {
       setMessage("큐 제출 처리 중 오류가 발생했습니다.");
     } finally {
       setSubmittingSubmitId(null);
+    }
+  };
+
+  // 실패한 작업을 같은 조건으로 재등록 후 즉시 큐 제출한다.
+  // (백엔드는 FAILED 잡의 재제출을 허용하지 않으므로 새 잡을 만든다.)
+  const retryJob = async (job: FetchJob) => {
+    setRetryingId(job.id);
+    setMessage(null);
+
+    const payload =
+      typeof job.request_payload === "string"
+        ? safeParse(job.request_payload)
+        : job.request_payload;
+    const query =
+      payload && typeof payload === "object" ? (payload as Record<string, unknown>) : {};
+
+    try {
+      const createRes = await fetch(`${API_BASE}/jobs/fetch`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ source: job.source, query })
+      });
+      if (!createRes.ok) {
+        const errorText = await createRes.text();
+        setMessage(`재시도 등록 실패: ${errorText}`);
+        return;
+      }
+      const created = await createRes.json();
+      const newId = created.fetchJobId as number;
+
+      const submitRes = await fetch(`${API_BASE}/jobs/fetch/${newId}/submit`, {
+        method: "POST"
+      });
+      if (!submitRes.ok) {
+        const errorText = await submitRes.text();
+        setMessage(`재시도 큐 제출 실패(작업 #${newId} 생성됨): ${errorText}`);
+        await loadJobs();
+        return;
+      }
+
+      setMessage(`작업 #${job.id}을(를) 새 작업 #${newId}(으)로 재시도했습니다.`);
+      // GDELT/Reuters는 5초당 1요청 제한 → 다음 제출/재시도를 잠시 막는다.
+      if (isGdeltFamilySource(activeSource)) {
+        setGdeltCooldownUntil(Date.now() + GDELT_COOLDOWN_MS);
+      }
+      await loadJobs();
+    } catch {
+      setMessage("재시도 처리 중 오류가 발생했습니다.");
+    } finally {
+      setRetryingId(null);
     }
   };
 
@@ -328,6 +469,48 @@ export function ManualFetchManager(): JSX.Element {
     void loadJobs();
     void loadPresets();
   }, [loadJobs, loadPresets]);
+
+  // 소스 전환 시 해당 소스의 최근 검색어를 불러온다.
+  useEffect(() => {
+    setRecentSearches(readRecentSearches(sourceParam));
+  }, [sourceParam]);
+
+  // 쿨다운이 진행 중일 때만 카운트다운을 위해 현재 시각을 갱신한다.
+  useEffect(() => {
+    if (gdeltCooldownUntil <= Date.now()) return;
+    const timer = setInterval(() => {
+      setNow(Date.now());
+      if (Date.now() >= gdeltCooldownUntil) clearInterval(timer);
+    }, 500);
+    return () => clearInterval(timer);
+  }, [gdeltCooldownUntil]);
+
+  const isGdeltFamily = isGdeltFamilySource(activeSource);
+  const gdeltCooldownRemaining = isGdeltFamily
+    ? Math.max(0, Math.ceil((gdeltCooldownUntil - now) / 1000))
+    : 0;
+
+  // 검색 성공 시 현재 소스의 최근 검색어에 추가(중복 제거, 최신순, 최대 개수 제한).
+  const addRecentSearch = useCallback(
+    (term: string) => {
+      const trimmed = term.trim();
+      if (!trimmed) return;
+      setRecentSearches((current) => {
+        const next = [trimmed, ...current.filter((item) => item !== trimmed)].slice(
+          0,
+          MAX_RECENT_SEARCHES
+        );
+        writeRecentSearches(sourceParam, next);
+        return next;
+      });
+    },
+    [sourceParam]
+  );
+
+  const clearRecentSearches = useCallback(() => {
+    setRecentSearches([]);
+    writeRecentSearches(sourceParam, []);
+  }, [sourceParam]);
 
   // 프리셋 선택 적용 핸들러
   const handleSelectPreset = (presetId: number | "") => {
@@ -546,6 +729,7 @@ export function ManualFetchManager(): JSX.Element {
 
       const data = await res.json();
       setMessage(`수집 작업 #${data.fetchJobId} 등록 완료`);
+      addRecentSearch(q);
       await loadJobs();
     } catch {
       setMessage("서버 연결 중 오류가 발생했습니다.");
@@ -612,6 +796,7 @@ export function ManualFetchManager(): JSX.Element {
       }
       const data = await res.json();
       setMessage(`수집 작업 #${data.fetchJobId} 등록 완료`);
+      if (q) addRecentSearch(q);
       await loadJobs();
     } catch {
       setMessage("서버 연결 중 오류가 발생했습니다.");
@@ -796,15 +981,22 @@ export function ManualFetchManager(): JSX.Element {
         )}
 
         <div className="mt-5 grid gap-4">
-          <label className="grid gap-1 text-sm">
-            <span className="font-semibold text-ink-700">검색어 q</span>
-            <input
-              value={q}
-              onChange={(event) => setQ(event.target.value)}
-              className="rounded-md border border-line px-3 py-2"
-              placeholder="예: AI, 반도체, 증권"
+          <div className="grid gap-1 text-sm">
+            <label className="grid gap-1">
+              <span className="font-semibold text-ink-700">검색어 q</span>
+              <input
+                value={q}
+                onChange={(event) => setQ(event.target.value)}
+                className="rounded-md border border-line px-3 py-2"
+                placeholder="예: AI, 반도체, 증권"
+              />
+            </label>
+            <RecentSearches
+              items={recentSearches}
+              onPick={(term) => setQ(term)}
+              onClear={clearRecentSearches}
             />
-          </label>
+          </div>
 
           <fieldset className="grid gap-2">
             <div className="flex items-center justify-between gap-3">
@@ -1171,17 +1363,24 @@ export function ManualFetchManager(): JSX.Element {
                   : "The Guardian Open Platform에서 키워드로 기사를 검색해 수집합니다(본문 제공)."}
               {activeSource === "guardian" && " GUARDIAN_API_KEY 필요."}
             </p>
-            <label className="mt-5 grid gap-1 text-sm">
-              <span className="font-semibold text-ink-700">
-                검색어 q{activeSource === "reuters" ? " (선택)" : ""}
-              </span>
-              <input
-                value={keywordQ}
-                onChange={(event) => setKeywordQ(event.target.value)}
-                className="rounded-md border border-line px-3 py-2"
-                placeholder="예: artificial intelligence, tariffs"
+            <div className="mt-5 grid gap-1 text-sm">
+              <label className="grid gap-1">
+                <span className="font-semibold text-ink-700">
+                  검색어 q{activeSource === "reuters" ? " (선택)" : ""}
+                </span>
+                <input
+                  value={keywordQ}
+                  onChange={(event) => setKeywordQ(event.target.value)}
+                  className="rounded-md border border-line px-3 py-2"
+                  placeholder="예: artificial intelligence, tariffs"
+                />
+              </label>
+              <RecentSearches
+                items={recentSearches}
+                onPick={(term) => setKeywordQ(term)}
+                onClear={clearRecentSearches}
               />
-            </label>
+            </div>
             <label className="mt-4 grid gap-1 text-sm">
               <span className="font-semibold text-ink-700">수집 건수</span>
               <input
@@ -1254,6 +1453,12 @@ export function ManualFetchManager(): JSX.Element {
                           {job.error_message}
                         </p>
                       )}
+                      {isRateLimitError(job.error_message) && (
+                        <p className="mt-1 max-w-xs rounded bg-amber-50 px-2 py-1 text-xs text-amber-700">
+                          GDELT는 5초당 1회만 요청할 수 있습니다. 잠시 후 오른쪽
+                          <strong> 재시도</strong> 버튼으로 다시 수집해 주세요.
+                        </p>
+                      )}
                     </td>
                     <td className="px-4 py-3 text-xs text-ink-500">
                       {compactPayload(job.request_payload)}
@@ -1277,10 +1482,22 @@ export function ManualFetchManager(): JSX.Element {
                             <button
                               type="button"
                               onClick={() => void submitJob(job.id)}
-                              disabled={submittingSubmitId === job.id}
+                              disabled={
+                                submittingSubmitId === job.id ||
+                                gdeltCooldownRemaining > 0
+                              }
+                              title={
+                                gdeltCooldownRemaining > 0
+                                  ? `GDELT는 5초당 1회만 요청할 수 있습니다. ${gdeltCooldownRemaining}초 후 다시 제출하세요.`
+                                  : undefined
+                              }
                               className="rounded-md bg-[#1167b1] px-2.5 py-1 font-semibold text-white hover:bg-[#0e5a9b] disabled:opacity-50"
                             >
-                              {submittingSubmitId === job.id ? "제출 중..." : "큐 제출"}
+                              {submittingSubmitId === job.id
+                                ? "제출 중..."
+                                : gdeltCooldownRemaining > 0
+                                  ? `${gdeltCooldownRemaining}초 후 제출`
+                                  : "큐 제출"}
                             </button>
                           </>
                         ) : job.status === "PENDING" ? (
@@ -1299,6 +1516,24 @@ export function ManualFetchManager(): JSX.Element {
                           >
                             기사 보기
                           </a>
+                        ) : job.status === "FAILED" ? (
+                          <button
+                            type="button"
+                            onClick={() => void retryJob(job)}
+                            disabled={retryingId === job.id || gdeltCooldownRemaining > 0}
+                            title={
+                              gdeltCooldownRemaining > 0
+                                ? `GDELT는 5초당 1회만 요청할 수 있습니다. ${gdeltCooldownRemaining}초 후 재시도하세요.`
+                                : "같은 조건으로 새 작업을 만들어 다시 수집합니다."
+                            }
+                            className="rounded-md border border-[#1167b1] px-2.5 py-1 font-semibold text-[#1167b1] hover:bg-slate-50 disabled:opacity-50"
+                          >
+                            {retryingId === job.id
+                              ? "재시도 중..."
+                              : gdeltCooldownRemaining > 0
+                                ? `${gdeltCooldownRemaining}초 후 재시도`
+                                : "재시도"}
+                          </button>
                         ) : (
                           <span className="text-ink-400">-</span>
                         )}

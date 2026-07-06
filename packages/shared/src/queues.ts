@@ -11,7 +11,9 @@ export const QUEUE_NAMES = {
 export type QueueName = (typeof QUEUE_NAMES)[keyof typeof QUEUE_NAMES];
 
 export const TRANSLATION_TARGETS = {
-  body: "BODY"
+  body: "BODY",
+  // 번역 본문을 근거로 자체 문장의 새 기사로 재작성(LICENSED 발행용).
+  rewrite: "REWRITE"
 } as const;
 
 export type TranslationTarget =

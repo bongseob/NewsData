@@ -97,7 +97,10 @@ export interface SaveTranslationsRequest {
   translatedTitle?: string | null;
   translatedSubtitle?: string | null;
   translatedBody?: string | null;
-  keywords?: string[] | string | null;
+  // 발행용 SEO 키워드. 수집 원본 keywords와 분리해 seo_keywords에 저장한다.
+  seoKeywords?: string[] | string | null;
+  // AI 재작성 기사 본문(LICENSED 발행용). 편집기에서 검토·수정 후 저장한다.
+  rewrittenBody?: string | null;
 }
 
 const VALID_REVIEW_STATES: ReadonlySet<string> = new Set(
@@ -160,6 +163,32 @@ export class ArticlesService {
     }
 
     const job = await this.enqueueBodyTranslation(id);
+
+    return {
+      articleId: id,
+      queue: QUEUE_NAMES.translate,
+      queueJobId: job.id,
+      status: "QUEUED"
+    };
+  }
+
+  // 번역 본문을 근거로 재작성 기사를 생성하는 잡을 큐에 등록한다(LICENSED 발행용).
+  async rewriteArticle(id: number): Promise<TranslateBodyResult> {
+    const repository = new ArticlesRepository(this.pool);
+    const article = await repository.findById(id);
+    if (!article) {
+      throw new NotFoundException("Article not found.");
+    }
+
+    const sourceBody =
+      article.translated_body || article.original_body || article.body;
+    if (!sourceBody) {
+      throw new BadRequestException(
+        "재작성할 번역 본문이 없습니다. 본문 번역을 먼저 진행하세요."
+      );
+    }
+
+    const job = await this.enqueueRewrite(id);
 
     return {
       articleId: id,
@@ -264,7 +293,7 @@ export class ArticlesService {
 
     if (
       normalizedTarget === CONTENT_GENERATION_TARGETS.keywords &&
-      this.normalizeKeywords(article.keywords).length > 0
+      this.normalizeKeywords(article.seo_keywords).length > 0
     ) {
       throw new BadRequestException("이미 키워드가 있습니다.");
     }
@@ -440,10 +469,10 @@ export class ArticlesService {
       return trimmed.length > 0 ? trimmed : null;
     };
     const translatedBody = trim(input.translatedBody);
-    const keywords =
-      input.keywords === undefined
+    const seoKeywords =
+      input.seoKeywords === undefined
         ? undefined
-        : this.normalizeKeywords(input.keywords);
+        : this.normalizeKeywords(input.seoKeywords);
 
     await repository.updateTranslations(id, {
       translatedTitle: trim(input.translatedTitle),
@@ -452,7 +481,8 @@ export class ArticlesService {
         typeof translatedBody === "string"
           ? appendTranslationAttribution(translatedBody, article.source_url)
           : translatedBody,
-      keywords
+      seoKeywords,
+      rewrittenBody: trim(input.rewrittenBody)
     });
 
     const updated = await repository.findById(id);
@@ -471,6 +501,34 @@ export class ArticlesService {
         target: TRANSLATION_TARGETS.body
       },
       {
+        // 기사별 고정 jobId로 진행 중(대기·활성·지연)인 같은 기사의 중복 번역 잡을
+        // 차단한다(이중 과금·이중 번역 방지). 완료/최종 실패 시 잡을 제거해 jobId를
+        // 풀어, 이후 재번역 요청은 정상적으로 새로 등록되게 한다.
+        jobId: `translate-body-${articleId}`,
+        removeOnComplete: true,
+        removeOnFail: true,
+        attempts: 3,
+        backoff: {
+          type: "exponential",
+          delay: 30000
+        }
+      }
+    );
+  }
+
+  private enqueueRewrite(articleId: number) {
+    return this.translateQueue.add(
+      "rewrite-article",
+      {
+        articleId,
+        target: TRANSLATION_TARGETS.rewrite
+      },
+      {
+        // 기사별 고정 jobId로 진행 중 중복 재작성 잡을 차단(이중 과금 방지).
+        // 완료/최종 실패 시 잡을 제거해 이후 재생성 요청이 정상 등록되게 한다.
+        jobId: `rewrite-${articleId}`,
+        removeOnComplete: true,
+        removeOnFail: true,
         attempts: 3,
         backoff: {
           type: "exponential",

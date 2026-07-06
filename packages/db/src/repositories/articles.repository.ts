@@ -43,6 +43,8 @@ export interface ArticleRow extends RowDataPacket {
   thumbnail_is_generated?: number;
   translated_summary?: string | null;
   seo_keywords?: string[] | string | null;
+  rewritten_body?: string | null;
+  rewritten_at?: Date | null;
 }
 
 export interface ArticleStatusCountRow extends RowDataPacket {
@@ -87,7 +89,10 @@ export interface UpdateTranslationsInput {
   translatedTitle?: string | null;
   translatedSubtitle?: string | null;
   translatedBody?: string | null;
-  keywords?: string[] | null;
+  // 발행용 SEO 키워드. 수집 원본 keywords 컬럼과 분리해 seo_keywords에 저장한다.
+  seoKeywords?: string[] | null;
+  // AI 재작성 기사 본문(LICENSED 발행용). 편집기에서 검토·수정 후 저장한다.
+  rewrittenBody?: string | null;
 }
 
 export interface UpsertArticleInput {
@@ -251,8 +256,8 @@ export class ArticlesRepository {
         source_url = VALUES(source_url),
         press_time = VALUES(press_time),
         raw_payload = VALUES(raw_payload),
-        -- 최초 수집 요청을 보존한다: 기존 값이 있으면 유지, 없을 때만 채운다.
-        fetch_job_id = COALESCE(fetch_job_id, VALUES(fetch_job_id)),
+        -- 최근 수집 요청으로 갱신한다. 단, 새 값이 없을(NULL) 때는 기존 값을 지우지 않는다.
+        fetch_job_id = COALESCE(VALUES(fetch_job_id), fetch_job_id),
         license_policy = VALUES(license_policy),
         canonical_url = VALUES(canonical_url),
         updated_at = CURRENT_TIMESTAMP(3)`,
@@ -447,6 +452,21 @@ export class ArticlesRepository {
     );
   }
 
+  async updateRewrittenBody(
+    id: number,
+    rewrittenBody: string,
+    rewrittenAt: Date
+  ): Promise<void> {
+    await this.db.execute(
+      `UPDATE articles
+       SET rewritten_body = :rewrittenBody,
+           rewritten_at = :rewrittenAt,
+           updated_at = CURRENT_TIMESTAMP(3)
+       WHERE id = :id`,
+      { id, rewrittenBody, rewrittenAt }
+    );
+  }
+
   /**
    * 번역문 수동 편집을 저장한다. 전달된 필드만 갱신한다.
    * 제목/본문 번역 갱신 시 각 *_translated_at 도 현재 시각으로 갱신한다.
@@ -472,9 +492,13 @@ export class ArticlesRepository {
       sets.push("body_translated_at = CURRENT_TIMESTAMP(3)");
       params.translatedBody = input.translatedBody;
     }
-    if (input.keywords !== undefined) {
-      sets.push("keywords = :keywords");
-      params.keywords = input.keywords ? JSON.stringify(input.keywords) : null;
+    if (input.seoKeywords !== undefined) {
+      sets.push("seo_keywords = :seoKeywords");
+      params.seoKeywords = input.seoKeywords ? JSON.stringify(input.seoKeywords) : null;
+    }
+    if (input.rewrittenBody !== undefined) {
+      sets.push("rewritten_body = :rewrittenBody");
+      params.rewrittenBody = input.rewrittenBody;
     }
 
     if (sets.length === 0) {

@@ -6,7 +6,11 @@ import {
   type TranslateJobData
 } from "@newsdata/shared";
 import { ArticlesRepository, createMysqlPool } from "@newsdata/db";
-import { translateToKorean, generateSummaryAndSEO } from "../translate/openai.js";
+import {
+  translateToKorean,
+  generateSummaryAndSEO,
+  generateRewrittenArticle
+} from "../translate/openai.js";
 
 const pool = createMysqlPool({
   host: process.env.MYSQL_HOST || "localhost",
@@ -27,13 +31,31 @@ export function registerTranslateWorker(
       const { articleId, target } = job.data;
       console.log(`[Translate] job accepted: ${job.id}`, job.data);
 
-      if (target !== TRANSLATION_TARGETS.body) {
+      if (
+        target !== TRANSLATION_TARGETS.body &&
+        target !== TRANSLATION_TARGETS.rewrite
+      ) {
         throw new Error(`Unsupported translation target: ${target}`);
       }
 
       const article = await articlesRepo.findById(articleId);
       if (!article) {
         throw new Error(`Article not found: ${articleId}`);
+      }
+
+      // 재작성: 번역 본문을 근거로 자체 문장의 새 기사를 생성한다(LICENSED 발행용).
+      if (target === TRANSLATION_TARGETS.rewrite) {
+        const translatedBody = article.translated_body || article.original_body || article.body;
+        if (!translatedBody) {
+          throw new Error(`No source body to rewrite for article: ${articleId}`);
+        }
+        const rewritten = await generateRewrittenArticle(translatedBody);
+        if (!rewritten) {
+          throw new Error(`Rewrite returned empty text for article: ${articleId}`);
+        }
+        await articlesRepo.updateRewrittenBody(articleId, rewritten, new Date());
+        console.log(`[Translate] rewritten article generated for ${articleId}`);
+        return { articleId, target };
       }
 
       const sourceBody = article.original_body || article.body;

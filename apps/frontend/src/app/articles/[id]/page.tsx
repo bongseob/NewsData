@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { Sidebar } from "../../components/Sidebar";
 import { API_BASE } from "../../../lib/api-base";
 import { BodyTranslationButton } from "./BodyTranslationButton";
+import { RewriteButton } from "./RewriteButton";
 import { ImageGenerationButton } from "./ImageGenerationButton";
 import { TranslationEditor } from "./TranslationEditor";
 import { ArticleActions } from "./ArticleActions";
@@ -37,6 +38,9 @@ interface ArticleDetail {
   thumbnail_source_url?: string | null;
   thumbnail_is_generated?: number | boolean | null;
   seo_keywords?: string[] | string | null;
+  rewritten_body?: string | null;
+  rewritten_at?: string | null;
+  license_policy?: string | null;
 }
 
 async function getArticle(id: string): Promise<ArticleDetail | null> {
@@ -113,7 +117,13 @@ export default async function ArticleDetailPage({
   const originalBody = article.original_body || article.body;
   const translatedBody = article.translated_body;
   const displayTitle = article.translated_title || article.title;
-  const keywords = normalizeKeywords(article.seo_keywords || article.keywords);
+  // 좌측 편집기: 우리가 발행용으로 생성/편집하는 SEO 키워드.
+  const seoKeywords = normalizeKeywords(article.seo_keywords ?? null);
+  // 우측 메타데이터: 수집한 원본 기사의 키워드(불변).
+  const sourceKeywords = normalizeKeywords(article.keywords);
+  // LICENSED(저작권 소스)만 재작성 기사 발행 대상. PUBLIC_DOMAIN은 전문 발행이라 제외.
+  const isLicensed = article.license_policy !== "PUBLIC_DOMAIN";
+  const rewrittenBody = article.rewritten_body ?? "";
 
   return (
     <main className="min-h-screen bg-[#f4f6f8] text-ink-950">
@@ -214,11 +224,17 @@ export default async function ArticleDetailPage({
                   />
                 </div>
 
-                <div className="mt-5">
+                <div className="mt-5 grid gap-2">
                   <BodyTranslationButton
                     articleId={article.id}
                     disabled={!originalBody}
                   />
+                  {isLicensed && (
+                    <RewriteButton
+                      articleId={article.id}
+                      disabled={!originalBody}
+                    />
+                  )}
                 </div>
 
                 <TranslationEditor
@@ -226,7 +242,9 @@ export default async function ArticleDetailPage({
                   initialTitle={article.translated_title ?? ""}
                   initialSubtitle={article.translated_summary || article.translated_subtitle || ""}
                   initialBody={translatedBody ?? ""}
-                  initialKeywords={keywords}
+                  initialKeywords={seoKeywords}
+                  initialRewrittenBody={rewrittenBody}
+                  showRewrittenBody={isLicensed}
                 />
 
                 {originalBody && (
@@ -282,8 +300,8 @@ export default async function ArticleDetailPage({
                   <div className="flex justify-between gap-3">
                     <dt className="text-ink-500">keywords</dt>
                     <dd className="flex flex-wrap justify-end gap-1 text-right">
-                      {keywords.length > 0 ? (
-                        keywords.map((keyword) => (
+                      {sourceKeywords.length > 0 ? (
+                        sourceKeywords.map((keyword) => (
                           <span
                             key={keyword}
                             className="rounded-full bg-slate-100 px-2 py-0.5 text-ink-700"

@@ -61,8 +61,9 @@ function getArticleSubtitle(article: ArticleRow): string | null {
   if (isPublicDomain(article)) {
     return article.translated_summary || article.translated_subtitle || null;
   }
-  // LICENSED: 요약은 본문에 사용하므로 부제목은 번역 부제만(없으면 비움).
-  return article.translated_subtitle || null;
+  // LICENSED: 본문(요약 + 원문 링크)에 이미 요약이 들어간다. 편집기가 부제목 입력칸을
+  // 요약으로 채워 저장하면 부제목·본문에 요약이 중복되므로, LICENSED는 부제목을 비운다.
+  return null;
 }
 
 function getArticleBody(article: ArticleRow): string | null {
@@ -70,18 +71,22 @@ function getArticleBody(article: ArticleRow): string | null {
   if (isPublicDomain(article)) {
     return article.translated_body || article.original_body || article.body;
   }
-  // LICENSED(저작권 소스·정책 미지정): 전문 재배포 금지 → AI 요약 + 원문 링크만.
+  // LICENSED(저작권 소스·정책 미지정): 전문 재배포 금지.
+  // 우선순위: 재작성 기사(자체 문장) + 원문 링크 → 없으면 AI 요약 + 원문 링크.
+  const rewritten = article.rewritten_body?.trim();
+  if (rewritten) {
+    return rewritten + buildSourceLink(article);
+  }
   const summary = article.translated_summary || article.translated_subtitle;
   if (!summary) {
     throw new Error(
-      "LICENSED 기사에 요약(translated_summary)이 없어 발행할 수 없습니다. 본문 번역·요약을 먼저 생성하세요."
+      "LICENSED 기사에 재작성 본문·요약이 모두 없어 발행할 수 없습니다. 재작성 또는 본문 번역·요약을 먼저 생성하세요."
     );
   }
   return summary + buildSourceLink(article);
 }
 
-function getArticleKeywords(article: ArticleRow): string[] {
-  const raw = article.keywords;
+function parseKeywords(raw: unknown): string[] {
   if (Array.isArray(raw)) {
     return raw.map((value) => String(value).trim()).filter((value) => value.length > 0);
   }
@@ -104,6 +109,14 @@ function getArticleKeywords(article: ArticleRow): string[] {
   }
 
   return [];
+}
+
+// 발행에는 우리가 생성/편집한 SEO 키워드(seo_keywords)를 쓴다.
+// 없을 때만 수집 원본 keywords로 폴백한다(레거시 데이터 안전).
+function getArticleKeywords(article: ArticleRow): string[] {
+  const seo = parseKeywords(article.seo_keywords);
+  if (seo.length > 0) return seo;
+  return parseKeywords(article.keywords);
 }
 
 function formatError(error: unknown): string {

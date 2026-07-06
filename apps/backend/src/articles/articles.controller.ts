@@ -130,6 +130,11 @@ export class ArticlesController {
     return this.articlesService.translateBody(Number(id));
   }
 
+  @Post(":id/rewrite")
+  rewriteArticle(@Param("id") id: string) {
+    return this.articlesService.rewriteArticle(Number(id));
+  }
+
   @Post(":id/generate-image")
   generateCopyrightSafeImage(@Param("id") id: string) {
     return this.articlesService.generateCopyrightSafeImage(Number(id));
@@ -159,7 +164,8 @@ export class ArticlesController {
       translatedTitle?: string | null;
       translatedSubtitle?: string | null;
       translatedBody?: string | null;
-      keywords?: string[] | string | null;
+      seoKeywords?: string[] | string | null;
+      rewrittenBody?: string | null;
     }
   ) {
     return this.articlesService.saveTranslations(Number(id), body ?? {});

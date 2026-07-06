@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ARTICLE_SOURCES } from "@newsdata/shared";
 import { API_BASE } from "../../lib/api-base";
 
@@ -156,8 +156,14 @@ export function ArticleBoard({
   const router = useRouter();
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [searchInput, setSearchInput] = useState(search);
+  const [fetchJobInput, setFetchJobInput] = useState(fetchJobId ? String(fetchJobId) : "");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+
+  // 링크(#N)나 필터 해제로 fetchJobId가 바뀌면 입력값도 동기화한다.
+  useEffect(() => {
+    setFetchJobInput(fetchJobId ? String(fetchJobId) : "");
+  }, [fetchJobId]);
 
   const allSelected = items.length > 0 && selected.size === items.length;
   const actions = TAB_ACTIONS[tab];
@@ -211,6 +217,14 @@ export function ArticleBoard({
     const value = searchInput.trim();
     router.push(
       `/articles?${buildParams({ search: value || undefined, page: "1" }).toString()}`
+    );
+  };
+
+  const submitFetchJob = (event: React.FormEvent) => {
+    event.preventDefault();
+    const value = fetchJobInput.trim();
+    router.push(
+      `/articles?${buildParams({ fetchJobId: value || undefined, page: "1" }).toString()}`
     );
   };
 
@@ -376,6 +390,22 @@ export function ArticleBoard({
           >
             {order === "asc" ? "↑" : "↓"}
           </button>
+          <form onSubmit={submitFetchJob} className="flex items-center gap-2">
+            <input
+              type="number"
+              min={1}
+              value={fetchJobInput}
+              onChange={(e) => setFetchJobInput(e.target.value)}
+              placeholder="수집번호"
+              className="w-28 rounded-md border border-line px-3 py-1.5 text-sm"
+            />
+            <button
+              type="submit"
+              className="rounded-md border border-line bg-white px-3 py-1.5 text-sm font-semibold text-ink-700 hover:bg-slate-50"
+            >
+              수집조회
+            </button>
+          </form>
           <form onSubmit={submitSearch} className="flex items-center gap-2">
             <input
               value={searchInput}

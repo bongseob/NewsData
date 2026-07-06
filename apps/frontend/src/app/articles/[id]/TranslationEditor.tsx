@@ -10,6 +10,8 @@ interface TranslationEditorProps {
   initialSubtitle: string;
   initialBody: string;
   initialKeywords: string[];
+  initialRewrittenBody?: string;
+  showRewrittenBody?: boolean;
 }
 
 export function TranslationEditor({
@@ -17,13 +19,16 @@ export function TranslationEditor({
   initialTitle,
   initialSubtitle,
   initialBody,
-  initialKeywords
+  initialKeywords,
+  initialRewrittenBody = "",
+  showRewrittenBody = false
 }: TranslationEditorProps): JSX.Element {
   const router = useRouter();
   const [title, setTitle] = useState(initialTitle);
   const [subtitle, setSubtitle] = useState(initialSubtitle);
   const [body, setBody] = useState(initialBody);
   const [keywords, setKeywords] = useState(initialKeywords.join(", "));
+  const [rewrittenBody, setRewrittenBody] = useState(initialRewrittenBody);
   const [subtitleSuggestions, setSubtitleSuggestions] = useState<string[]>([]);
   const [keywordSuggestions, setKeywordSuggestions] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
@@ -36,7 +41,8 @@ export function TranslationEditor({
     setSubtitle(initialSubtitle);
     setBody(initialBody);
     setKeywords(initialKeywords.join(", "));
-  }, [initialTitle, initialSubtitle, initialBody, initialKeywords]);
+    setRewrittenBody(initialRewrittenBody);
+  }, [initialTitle, initialSubtitle, initialBody, initialKeywords, initialRewrittenBody]);
 
   const subtitleSummaryText = subtitleSuggestions
     .map((sentence) => `- ${sentence}`)
@@ -161,7 +167,8 @@ export function TranslationEditor({
           translatedTitle: title,
           translatedSubtitle: subtitle,
           translatedBody: body,
-          keywords: parseKeywords()
+          seoKeywords: parseKeywords(),
+          ...(showRewrittenBody ? { rewrittenBody } : {})
         })
       });
 
@@ -335,6 +342,30 @@ export function TranslationEditor({
               </div>
             )}
           </div>
+        )}
+
+        {showRewrittenBody && (
+          <label className="grid gap-1 text-xs font-semibold text-ink-500">
+            <span className="flex items-center justify-between gap-2">
+              <span>
+                재작성 본문 <span className="font-normal text-ink-400">(LICENSED 발행 본문)</span>
+              </span>
+              <button
+                type="button"
+                onClick={() => void copyText("재작성 본문을", rewrittenBody)}
+                className={copyButtonClass}
+              >
+                복사
+              </button>
+            </span>
+            <textarea
+              value={rewrittenBody}
+              onChange={(e) => setRewrittenBody(e.target.value)}
+              rows={12}
+              placeholder="'재작성 기사 생성'으로 초안을 만든 뒤 검토·수정하세요. 저작권 소스는 이 재작성 본문 + 원문 링크로 발행됩니다."
+              className="rounded-md border border-line px-3 py-2 text-sm font-normal leading-relaxed text-ink-900"
+            />
+          </label>
         )}
 
         <label className="grid gap-1 text-xs font-semibold text-ink-500">

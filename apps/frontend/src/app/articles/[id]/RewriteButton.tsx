@@ -4,19 +4,18 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { API_BASE } from "../../../lib/api-base";
 
-interface BodyTranslationButtonProps {
+interface RewriteButtonProps {
   articleId: number;
   disabled?: boolean;
 }
 
-interface ArticleTranslationStatus {
-  translated_body: string | null;
-  body_translated_at: string | null;
+interface ArticleRewriteStatus {
+  rewritten_body: string | null;
+  rewritten_at: string | null;
 }
 
 const POLL_INTERVAL_MS = 2000;
-// 본문 번역은 OpenAI 호출(본문 번역 + 요약·SEO)이 순차로 이어져 30초를 넘기기
-// 쉽다. 대부분의 번역이 첫 요청에서 완료로 잡히도록 대기 창을 넉넉히 둔다(약 2분).
+// 재작성은 OpenAI 생성이라 30초를 넘기기 쉽다. 넉넉히 대기(약 2분).
 const MAX_POLL_ATTEMPTS = 60;
 
 function wait(ms: number): Promise<void> {
@@ -25,15 +24,15 @@ function wait(ms: number): Promise<void> {
   });
 }
 
-export function BodyTranslationButton({
+export function RewriteButton({
   articleId,
   disabled = false
-}: BodyTranslationButtonProps): JSX.Element {
+}: RewriteButtonProps): JSX.Element {
   const router = useRouter();
   const [isRequesting, setIsRequesting] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
-  const waitForTranslation = async (): Promise<boolean> => {
+  const waitForRewrite = async (): Promise<boolean> => {
     for (let attempt = 0; attempt < MAX_POLL_ATTEMPTS; attempt += 1) {
       await wait(POLL_INTERVAL_MS);
 
@@ -44,8 +43,8 @@ export function BodyTranslationButton({
         continue;
       }
 
-      const article = (await res.json()) as ArticleTranslationStatus;
-      if (article.body_translated_at && article.translated_body) {
+      const article = (await res.json()) as ArticleRewriteStatus;
+      if (article.rewritten_at && article.rewritten_body) {
         return true;
       }
     }
@@ -53,9 +52,9 @@ export function BodyTranslationButton({
     return false;
   };
 
-  const translate = async () => {
+  const rewrite = async () => {
     const confirmed = window.confirm(
-      "OpenAI 사용량이 차감됩니다. 본문 번역 작업을 등록할까요?"
+      "OpenAI 사용량이 차감됩니다. 번역 본문을 근거로 재작성 기사를 생성할까요?"
     );
     if (!confirmed) return;
 
@@ -63,23 +62,23 @@ export function BodyTranslationButton({
     setMessage(null);
 
     try {
-      const res = await fetch(`${API_BASE}/articles/${articleId}/translate-body`, {
+      const res = await fetch(`${API_BASE}/articles/${articleId}/rewrite`, {
         method: "POST"
       });
 
       if (!res.ok) {
         const errorText = await res.text();
-        setMessage(`본문 번역 요청 실패: ${errorText}`);
+        setMessage(`재작성 요청 실패: ${errorText}`);
         return;
       }
 
-      setMessage("본문 번역 작업을 등록했습니다. 완료 여부를 확인하는 중입니다.");
+      setMessage("재작성 작업을 등록했습니다. 완료 여부를 확인하는 중입니다.");
 
-      const completed = await waitForTranslation();
+      const completed = await waitForRewrite();
       if (completed) {
-        setMessage("본문 번역이 완료되었습니다.");
+        setMessage("재작성 기사가 생성되었습니다. 아래 편집기에서 검토·수정하세요.");
       } else {
-        setMessage("본문 번역 작업을 등록했습니다. 아직 처리 중이면 잠시 후 새로고침해 주세요.");
+        setMessage("재작성 작업을 등록했습니다. 아직 처리 중이면 잠시 후 새로고침해 주세요.");
       }
 
       router.refresh();
@@ -94,11 +93,11 @@ export function BodyTranslationButton({
     <div className="grid gap-2">
       <button
         type="button"
-        onClick={() => void translate()}
+        onClick={() => void rewrite()}
         disabled={disabled || isRequesting}
-        className="rounded-md bg-[#1167b1] px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-[#0e5a9b] disabled:cursor-not-allowed disabled:opacity-50"
+        className="rounded-md border border-[#1167b1] px-4 py-2 text-sm font-semibold text-[#1167b1] hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
       >
-        {isRequesting ? "번역 요청 중..." : "본문 번역 요청"}
+        {isRequesting ? "재작성 중..." : "재작성 기사 생성"}
       </button>
       {message && (
         <p className="rounded-md bg-slate-50 px-3 py-2 text-xs text-ink-700">
