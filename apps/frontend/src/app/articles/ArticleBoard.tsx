@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { ARTICLE_SOURCES } from "@newsdata/shared";
 import { API_BASE } from "../../lib/api-base";
 
@@ -159,6 +159,7 @@ export function ArticleBoard({
   const [fetchJobInput, setFetchJobInput] = useState(fetchJobId ? String(fetchJobId) : "");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [isRefreshing, startRefresh] = useTransition();
 
   // 링크(#N)나 필터 해제로 fetchJobId가 바뀌면 입력값도 동기화한다.
   useEffect(() => {
@@ -389,6 +390,16 @@ export function ArticleBoard({
             className="rounded-md border border-line bg-white px-2.5 py-1.5 text-sm font-semibold text-ink-700 hover:bg-slate-50"
           >
             {order === "asc" ? "↑" : "↓"}
+          </button>
+          <button
+            type="button"
+            onClick={() => startRefresh(() => router.refresh())}
+            disabled={isRefreshing}
+            title="목록 새로고침"
+            aria-label="목록 새로고침"
+            className="rounded-md border border-line bg-white px-2.5 py-1.5 text-sm font-semibold text-ink-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <span className={isRefreshing ? "inline-block animate-spin" : "inline-block"}>⟳</span>
           </button>
           <form onSubmit={submitFetchJob} className="flex items-center gap-2">
             <input
