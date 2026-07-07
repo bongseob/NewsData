@@ -11,7 +11,8 @@ import {
   type NewsDataCategory,
   type NewsDataCountry,
   type NewsDataLanguage,
-  type NewsDataPriorityDomain
+  type NewsDataPriorityDomain,
+  type NewsDataSource
 } from "@newsdata/shared";
 import { API_BASE } from "../../lib/api-base";
 import {
@@ -143,6 +144,17 @@ function joinSelectedValues(values: readonly string[]): string {
   return values.join(",");
 }
 
+// NewsData.io domainurl은 프로토콜/경로/`www.` 없는 순수 호스트만 허용한다.
+// (예: "https://www.bbc.com/news" → "bbc.com")
+function normalizeDomainHost(value: string): string {
+  let host = value.trim();
+  if (!host) return "";
+  host = host.replace(/^[a-z]+:\/\//i, "");
+  host = host.split("/")[0].split("?")[0];
+  host = host.replace(/^www\./i, "");
+  return host.trim().toLowerCase();
+}
+
 function safeParse(value: string): unknown {
   try {
     return JSON.parse(value);
@@ -203,10 +215,15 @@ export function ManualFetchManager(): JSX.Element {
   const [countryToAdd, setCountryToAdd] = useState<"" | NewsDataCountry>("");
   const [languageToAdd, setLanguageToAdd] = useState<"" | NewsDataLanguage>("");
   const [domainUrl, setDomainUrl] = useState("");
+  const [domainUrlToAdd, setDomainUrlToAdd] = useState("");
   const [priorityDomain, setPriorityDomain] = useState<"" | NewsDataPriorityDomain>("");
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
   const [domain, setDomain] = useState("");
+  const [availableSources, setAvailableSources] = useState<NewsDataSource[]>([]);
+  const [sourceToAdd, setSourceToAdd] = useState("");
+  const [loadingSources, setLoadingSources] = useState(false);
+  const [sourceLabels, setSourceLabels] = useState<Record<string, string>>({});
   const [size, setSize] = useState("10");
   const [removeDuplicate, setRemoveDuplicate] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -286,8 +303,10 @@ export function ManualFetchManager(): JSX.Element {
     setFromDate(form.fromDate);
     setToDate(form.toDate);
     setDomainUrl(form.domainUrl);
+    setDomainUrlToAdd("");
     setPriorityDomain(form.priorityDomain);
     setDomain(form.domain);
+    setSourceToAdd("");
     setSize(form.size);
     setRemoveDuplicate(form.removeDuplicate);
   }, []);
@@ -683,6 +702,85 @@ export function ManualFetchManager(): JSX.Element {
     setLanguageToAdd("");
   };
 
+  const addDomainUrl = () => {
+    // NewsData.io domainurl은 프로토콜/경로 없는 순수 도메인(예: bbc.com)만 허용한다.
+    const value = normalizeDomainHost(domainUrlToAdd);
+    if (!value) return;
+    setMessage(null);
+    const current = parseCommaValues(domainUrl);
+    if (current.includes(value)) {
+      setMessage("이미 추가된 도메인 URL입니다.");
+      return;
+    }
+    if (current.length >= MAX_COMMA_VALUES) {
+      setMessage(`도메인 URL은 최대 ${MAX_COMMA_VALUES}개까지 추가할 수 있습니다.`);
+      return;
+    }
+    setDomainUrl([...current, value].join(","));
+    setDomainUrlToAdd("");
+  };
+
+  const removeDomainUrl = (value: string) => {
+    setMessage(null);
+    setDomainUrl(parseCommaValues(domainUrl).filter((item) => item !== value).join(","));
+  };
+
+  const loadSources = async () => {
+    setMessage(null);
+    setLoadingSources(true);
+    try {
+      const params = new URLSearchParams();
+      if (countries[0]) params.set("country", countries[0]);
+      if (categories[0]) params.set("category", categories[0]);
+      if (languages[0]) params.set("language", languages[0]);
+      if (priorityDomain) params.set("prioritydomain", priorityDomain);
+
+      const res = await fetch(`${API_BASE}/newsdata/sources?${params.toString()}`);
+      if (!res.ok) {
+        const text = await res.text();
+        setMessage(`소스 목록을 불러오지 못했습니다: ${text || res.status}`);
+        return;
+      }
+      const sources = (await res.json()) as NewsDataSource[];
+      setAvailableSources(sources);
+      if (sources.length === 0) {
+        setMessage("선택한 조건에 해당하는 소스가 없습니다. 국가/카테고리/언어를 조정해 보세요.");
+      }
+    } catch {
+      setMessage("소스 목록을 불러오는 중 오류가 발생했습니다.");
+    } finally {
+      setLoadingSources(false);
+    }
+  };
+
+  const addSource = () => {
+    if (!sourceToAdd) return;
+    setMessage(null);
+    const current = parseCommaValues(domain);
+    if (current.includes(sourceToAdd)) {
+      setMessage("이미 추가된 소스입니다.");
+      return;
+    }
+    if (current.length >= MAX_COMMA_VALUES) {
+      setMessage(`도메인(소스)은 최대 ${MAX_COMMA_VALUES}개까지 추가할 수 있습니다.`);
+      return;
+    }
+    const picked = availableSources.find((item) => item.id === sourceToAdd);
+    if (picked) {
+      setSourceLabels((prev) => ({
+        ...prev,
+        [picked.id]: picked.name || picked.id
+      }));
+    }
+    setDomain([...current, sourceToAdd].join(","));
+    setSourceToAdd("");
+  };
+
+  const removeDomain = (value: string) => {
+    setMessage(null);
+    setDomain(parseCommaValues(domain).filter((item) => item !== value).join(","));
+  };
+
   const validateCommaInput = (label: string, value: string): boolean => {
     const values = parseCommaValues(value);
     if (values.length > MAX_COMMA_VALUES) {
@@ -702,6 +800,14 @@ export function ManualFetchManager(): JSX.Element {
     setMessage(null);
 
     if (!validateCommaInput("도메인 URL", domainUrl)) {
+      setSubmitting(false);
+      return;
+    }
+
+    if (domain.trim() && parseCommaValues(domainUrl).length > 0) {
+      setMessage(
+        "도메인과 도메인 URL은 함께 사용할 수 없습니다. 둘 중 하나만 입력해 주세요."
+      );
       setSubmitting(false);
       return;
     }
@@ -1042,7 +1148,7 @@ export function ManualFetchManager(): JSX.Element {
                 {countries.length}/{MAX_COMMA_VALUES} 선택
               </span>
             </div>
-            <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
+            <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
               <select
                 value={countryToAdd}
                 onChange={(event) =>
@@ -1105,7 +1211,7 @@ export function ManualFetchManager(): JSX.Element {
                 {languages.length}/{MAX_COMMA_VALUES} 선택
               </span>
             </div>
-            <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
+            <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
               <select
                 value={languageToAdd}
                 onChange={(event) =>
@@ -1161,20 +1267,83 @@ export function ManualFetchManager(): JSX.Element {
             </div>
           </fieldset>
 
-          <label className="grid gap-1 text-sm">
-            <span className="flex items-center justify-between gap-2">
-              <span className="font-semibold text-ink-700">도메인 URL</span>
+          <fieldset className="grid gap-2 rounded-md border border-line p-3">
+            <div className="flex items-center justify-between gap-3">
+              <legend className="text-sm font-semibold text-ink-700">도메인 URL</legend>
               <span className="text-xs text-ink-500">
                 {parseCommaValues(domainUrl).length}/{MAX_COMMA_VALUES}
               </span>
-            </span>
-            <input
-              value={domainUrl}
-              onChange={(event) => setDomainUrl(event.target.value)}
-              className="rounded-md border border-line px-3 py-2"
-              placeholder="https://example.com,https://news.example.com"
-            />
-          </label>
+            </div>
+            <p className="text-xs text-ink-500">
+              프로토콜 없이 순수 도메인만 입력합니다(예: bbc.com). 붙여넣은 URL은 자동으로 정리됩니다.
+              NewsData.io가 색인한 도메인만 유효합니다.
+            </p>
+            <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
+              <input
+                value={domainUrlToAdd}
+                onChange={(event) => setDomainUrlToAdd(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    addDomainUrl();
+                  }
+                }}
+                disabled={domain.trim().length > 0}
+                className="min-w-0 rounded-md border border-line px-3 py-2 text-sm disabled:cursor-not-allowed disabled:bg-slate-100"
+                placeholder="bbc.com"
+              />
+              <button
+                type="button"
+                onClick={addDomainUrl}
+                disabled={domain.trim().length > 0}
+                className="rounded-md border border-line px-3 py-2 text-sm font-semibold text-ink-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-ink-400"
+              >
+                추가
+              </button>
+            </div>
+            {domain.trim().length > 0 && (
+              <span className="text-xs text-amber-700">
+                도메인을 입력하면 도메인 URL은 사용할 수 없습니다. (NewsData.io는 둘 중 하나만 허용)
+              </span>
+            )}
+            <div className="flex flex-wrap gap-2">
+              {parseCommaValues(domainUrl).length === 0 ? (
+                <span className="text-xs text-ink-500">추가된 도메인 URL이 없습니다.</span>
+              ) : (
+                parseCommaValues(domainUrl).map((url) => (
+                  <span
+                    key={url}
+                    className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-ink-700"
+                  >
+                    {url}
+                    <button
+                      type="button"
+                      onClick={() => removeDomainUrl(url)}
+                      className="text-ink-500 hover:text-red-700"
+                      aria-label={`${url} 삭제`}
+                    >
+                      ×
+                    </button>
+                  </span>
+                ))
+              )}
+            </div>
+            <div className="flex items-center justify-between gap-3 rounded bg-slate-50 px-3 py-2">
+              <span className="min-w-0 break-all text-xs text-ink-500">
+                생성 문자열: {domainUrl || "-"}
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  setDomainUrl("");
+                  setDomainUrlToAdd("");
+                }}
+                className="text-xs font-semibold text-red-700 hover:underline"
+              >
+                도메인 URL 초기화
+              </button>
+            </div>
+          </fieldset>
 
           <div className="grid gap-4 sm:grid-cols-2">
             <label className="grid gap-1 text-sm">
@@ -1208,15 +1377,102 @@ export function ManualFetchManager(): JSX.Element {
             </label>
           </div>
 
-          <label className="grid gap-1 text-sm">
-            <span className="font-semibold text-ink-700">도메인</span>
-            <input
-              value={domain}
-              onChange={(event) => setDomain(event.target.value)}
-              className="rounded-md border border-line px-3 py-2"
-              placeholder="reuters.com"
-            />
-          </label>
+          <fieldset className="grid gap-2 rounded-md border border-line p-3">
+            <div className="flex items-center justify-between gap-3">
+              <legend className="text-sm font-semibold text-ink-700">도메인(뉴스 소스)</legend>
+              <span className="text-xs text-ink-500">
+                {parseCommaValues(domain).length}/{MAX_COMMA_VALUES}
+              </span>
+            </div>
+            <p className="text-xs text-ink-500">
+              위에서 선택한 국가/카테고리/언어 기준으로 NewsData.io가 색인한 소스를 불러온 뒤
+              골라 담습니다. 직접 입력이 아니라 목록에서 선택해야 유효합니다.
+            </p>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={loadSources}
+                disabled={loadingSources || parseCommaValues(domainUrl).length > 0}
+                className="rounded-md border border-line px-3 py-2 text-sm font-semibold text-ink-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-ink-400"
+              >
+                {loadingSources ? "불러오는 중…" : "소스 불러오기"}
+              </button>
+              {availableSources.length > 0 && (
+                <span className="text-xs text-ink-500">{availableSources.length}개 소스</span>
+              )}
+            </div>
+            <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
+              <select
+                value={sourceToAdd}
+                onChange={(event) => setSourceToAdd(event.target.value)}
+                disabled={availableSources.length === 0 || parseCommaValues(domainUrl).length > 0}
+                className="min-w-0 rounded-md border border-line px-3 py-2 text-sm disabled:cursor-not-allowed disabled:bg-slate-100"
+              >
+                <option value="">
+                  {availableSources.length === 0 ? "먼저 소스를 불러오세요" : "소스 선택"}
+                </option>
+                {availableSources.map((item) => (
+                  <option
+                    key={item.id}
+                    value={item.id}
+                    disabled={parseCommaValues(domain).includes(item.id)}
+                  >
+                    {item.name || item.id} ({item.id})
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                onClick={addSource}
+                disabled={!sourceToAdd || parseCommaValues(domainUrl).length > 0}
+                className="rounded-md border border-line px-3 py-2 text-sm font-semibold text-ink-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-ink-400"
+              >
+                추가
+              </button>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {parseCommaValues(domain).length === 0 ? (
+                <span className="text-xs text-ink-500">추가된 소스가 없습니다.</span>
+              ) : (
+                parseCommaValues(domain).map((id) => (
+                  <span
+                    key={id}
+                    className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-ink-700"
+                  >
+                    {sourceLabels[id] ? `${sourceLabels[id]} (${id})` : id}
+                    <button
+                      type="button"
+                      onClick={() => removeDomain(id)}
+                      className="text-ink-500 hover:text-red-700"
+                      aria-label={`${id} 삭제`}
+                    >
+                      ×
+                    </button>
+                  </span>
+                ))
+              )}
+            </div>
+            <div className="flex items-center justify-between gap-3 rounded bg-slate-50 px-3 py-2">
+              <span className="min-w-0 break-all text-xs text-ink-500">
+                생성 문자열: {domain || "-"}
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  setDomain("");
+                  setSourceToAdd("");
+                }}
+                className="text-xs font-semibold text-red-700 hover:underline"
+              >
+                도메인 초기화
+              </button>
+            </div>
+            {parseCommaValues(domainUrl).length > 0 && (
+              <span className="text-xs text-amber-700">
+                도메인 URL을 추가하면 도메인은 사용할 수 없습니다. (NewsData.io는 둘 중 하나만 허용)
+              </span>
+            )}
+          </fieldset>
 
           <fieldset className="grid gap-3 rounded-md border border-line p-3">
             <legend className="text-sm font-semibold text-ink-700">수집 범위</legend>

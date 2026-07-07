@@ -29,6 +29,39 @@ export interface NewsDataResponse {
 }
 
 /**
+ * NewsData.io "sources" endpoint types.
+ * `id` is the value accepted by the `domain` query filter,
+ * `url` is the value (without protocol) accepted by `domainurl`.
+ */
+export interface NewsDataSource {
+  id: string;
+  name?: string | null;
+  url?: string | null;
+  icon?: string | null;
+  priority?: number | null;
+  description?: string | null;
+  category?: string[] | null;
+  language?: string[] | null;
+  country?: string[] | null;
+}
+
+export interface NewsDataSourcesResponse {
+  status: string;
+  totalResults?: number;
+  results: NewsDataSource[];
+}
+
+/**
+ * Filters accepted by the sources endpoint (single value each).
+ */
+export interface NewsDataSourcesQuery {
+  country?: string;
+  category?: string;
+  language?: string;
+  prioritydomain?: NewsDataPriorityDomain;
+}
+
+/**
  * Query parameters for manual/scheduled fetch
  */
 export interface NewsDataFetchQuery {

@@ -8,6 +8,8 @@ import { databaseProviders } from "./database/database.providers.js";
 import { HealthController } from "./health.controller.js";
 import { JobsController } from "./jobs/jobs.controller.js";
 import { JobsService } from "./jobs/jobs.service.js";
+import { NewsDataController } from "./newsdata/newsdata.controller.js";
+import { NewsDataService } from "./newsdata/newsdata.service.js";
 import { FailureLogsController } from "./operations/failure-logs.controller.js";
 import { FailureLogsService } from "./operations/failure-logs.service.js";
 import { QueueStatusController } from "./operations/queue-status.controller.js";
@@ -32,6 +34,7 @@ import { SourceConfigsService } from "./source-configs/source-configs.service.js
   controllers: [
     HealthController,
     JobsController,
+    NewsDataController,
     ArticlesController,
     SourceConfigsController,
     PublishController,
@@ -43,6 +46,7 @@ import { SourceConfigsService } from "./source-configs/source-configs.service.js
     ...queueProviders,
     ArticlesService,
     JobsService,
+    NewsDataService,
     SourceConfigsService,
     PublishService,
     QueueStatusService,
